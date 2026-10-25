@@ -19,6 +19,7 @@ import {
   Lang,
   DoctorStatus,
   ClinicSettings,
+  ReceptionNotification,
 } from "@/lib/types";
 import { showLocalNotification } from "@/lib/firebase";
 import {
@@ -32,7 +33,10 @@ import {
 } from "@/clinic.config";
 import { clinicToday } from "@/lib/date";
 import { templates } from "@/lib/messages";
-import { useDeviceViewport, DeviceViewportInfo } from "@/lib/use-device-viewport";
+import {
+  useDeviceViewport,
+  DeviceViewportInfo,
+} from "@/lib/use-device-viewport";
 
 const STORAGE_KEY = "auracare_clinic_state_v3";
 const PATIENT_SESSION_KEY = "auracare_current_patient_id_v3";
@@ -251,6 +255,7 @@ export const INITIAL_BOOKINGS: Booking[] = [
     called_at: new Date(Date.now() - 5 * 60000).toISOString(),
     notified_near_at: new Date(Date.now() - 20 * 60000).toISOString(),
     qr_image_url: null,
+    cancel_requested: false,
     created_at: new Date(Date.now() - 45 * 60000).toISOString(),
   },
   {
@@ -268,6 +273,7 @@ export const INITIAL_BOOKINGS: Booking[] = [
     called_at: null,
     notified_near_at: null,
     qr_image_url: null,
+    cancel_requested: false,
     created_at: new Date(Date.now() - 25 * 60000).toISOString(),
   },
   {
@@ -285,6 +291,7 @@ export const INITIAL_BOOKINGS: Booking[] = [
     called_at: null,
     notified_near_at: null,
     qr_image_url: null,
+    cancel_requested: false,
     created_at: new Date(Date.now() - 15 * 60000).toISOString(),
   },
 ];
@@ -339,6 +346,7 @@ export interface PersistedClinicState {
   bookings: Booking[];
   transactions: Transaction[];
   messages: ClinicMessage[];
+  receptionNotifications?: ReceptionNotification[];
 }
 
 export interface DoctorFormInput {
@@ -365,6 +373,7 @@ interface ClinicContextValue {
   bookings: Booking[];
   transactions: Transaction[];
   messages: ClinicMessage[];
+  receptionNotifications: ReceptionNotification[];
   currentPatient: Patient | null;
   isLoading: boolean;
   isRealtimeConnected: boolean;
@@ -377,10 +386,11 @@ interface ClinicContextValue {
   }) => Promise<Booking>;
   createWalkInBooking: (params: {
     doctorId: string;
+    existingPatientId?: string | null;
     patientName: string;
     patientPhone: string;
     isPriority: boolean;
-    paymentMethod: "cash" | "kpay" | "wavepay" | "ayapay";
+    paymentMethod: "cash" | "credit_points" | "kpay" | "wavepay" | "ayapay";
   }) => Promise<Booking>;
   advanceDoctorQueue: (doctorId: string) => Promise<{
     newQueueNumber: number;
@@ -388,10 +398,20 @@ interface ClinicContextValue {
   }>;
   setCustomQueueNumber: (doctorId: string, queueNumber: number) => Promise<void>;
   verifyReceiptAndConfirmBooking: (bookingId: string) => Promise<void>;
-  cancelBookingAndRefund: (bookingId: string) => Promise<{
+  requestPatientBookingCancel: (bookingId: string) => Promise<void>;
+  cancelBookingAndRefund: (
+    bookingId: string,
+    options?: {
+      grantCreditPoints?: boolean;
+      rejectRequestOnly?: boolean;
+    }
+  ) => Promise<{
     refundedAmount: number;
     patientName: string;
+    action: "refunded" | "cancelled_no_credit" | "rejected";
   }>;
+  markReceptionNotificationRead: (notificationId: string) => Promise<void>;
+  clearReceptionNotifications: () => Promise<void>;
   addDoctor: (input: DoctorFormInput) => Promise<Doctor>;
   updateDoctor: (
     doctorId: string,
@@ -421,7 +441,10 @@ interface ClinicContextValue {
   updateClinicSettings: (partial: Partial<ClinicSettings>) => Promise<void>;
   updateReceptionPin: (currentPin: string, newPin: string) => Promise<boolean>;
   updateSuperAdminPin: (currentPin: string, newPin: string) => Promise<boolean>;
-  adjustPatientCredits: (patientId: string, newCreditPoints: number) => Promise<void>;
+  adjustPatientCredits: (
+    patientId: string,
+    newCreditPoints: number
+  ) => Promise<void>;
   resetDemoData: () => Promise<void>;
 }
 
@@ -506,6 +529,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] =
     useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [messages, setMessages] = useState<ClinicMessage[]>(INITIAL_MESSAGES);
+  const [receptionNotifications, setReceptionNotifications] = useState<
+    ReceptionNotification[]
+  >([]);
   const [currentPatientId, setCurrentPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(true);
@@ -529,6 +555,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     if (Array.isArray(incoming.transactions))
       setTransactions(incoming.transactions);
     if (Array.isArray(incoming.messages)) setMessages(incoming.messages);
+    if (Array.isArray(incoming.receptionNotifications)) {
+      setReceptionNotifications(incoming.receptionNotifications);
+    }
   }, []);
 
   const persistState = useCallback(
@@ -608,7 +637,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         setIsRealtimeConnected(true);
 
         if (!data.hasState) {
-          // Seed server with initial or local state
           const initialPayload: PersistedClinicState = localLoaded || {
             version: Date.now(),
             settings: INITIAL_SETTINGS,
@@ -617,6 +645,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
             bookings: INITIAL_BOOKINGS,
             transactions: INITIAL_TRANSACTIONS,
             messages: INITIAL_MESSAGES,
+            receptionNotifications: [],
           };
           versionRef.current = initialPayload.version;
           localStorage.setItem(STORAGE_KEY, JSON.stringify(initialPayload));
@@ -735,6 +764,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
 
       return matched;
@@ -746,6 +776,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       lang,
       persistState,
     ]
@@ -797,7 +828,10 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       let receiptImageUrl: string | null = null;
       if (paymentMethod !== "credit_points") {
         if (receiptFile) {
-          receiptImageUrl = await uploadImageToCloudinaryOrDataUrl(receiptFile);
+          receiptImageUrl = await uploadImageToCloudinaryOrDataUrl(
+            receiptFile,
+            "receipts"
+          );
         } else {
           receiptImageUrl = SAMPLE_RECEIPT_SVG;
         }
@@ -838,6 +872,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         called_at: null,
         notified_near_at: null,
         qr_image_url: qrDataUrl,
+        cancel_requested: false,
         created_at: new Date().toISOString(),
       };
 
@@ -852,6 +887,24 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         created_at: new Date().toISOString(),
       };
 
+      // Create prominent Reception notification for this new online booking
+      const newRecNotif: ReceptionNotification = {
+        id: crypto.randomUUID(),
+        type: "new_booking",
+        booking_id: newBooking.id,
+        patient_id: currentPatient.id,
+        patient_name: currentPatient.name,
+        patient_phone: currentPatient.phone,
+        doctor_id: doctor.id,
+        doctor_name_my: doctor.name_my || doctor.name,
+        doctor_name_en: doctor.name,
+        room_number: doctor.room_number,
+        queue_number: nextQueueNumber,
+        payment_method: paymentMethod,
+        is_read: false,
+        created_at: new Date().toISOString(),
+      };
+
       const nextPatients = isInstantPaid
         ? patients.map((p) =>
             p.id === currentPatient.id
@@ -862,10 +915,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       const nextBookings = [...cleanedOldBookings, newBooking];
       const nextTransactions = [newTransaction, ...transactions];
+      const nextRecNotifs = [newRecNotif, ...receptionNotifications].slice(
+        0,
+        40
+      );
 
       setPatients(nextPatients);
       setBookings(nextBookings);
       setTransactions(nextTransactions);
+      setReceptionNotifications(nextRecNotifs);
 
       persistState({
         settings,
@@ -874,6 +932,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions: nextTransactions,
         messages,
+        receptionNotifications: nextRecNotifs,
       });
 
       return newBooking;
@@ -886,6 +945,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       patients,
       transactions,
       messages,
+      receptionNotifications,
       lang,
       persistState,
     ]
@@ -894,39 +954,64 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const createWalkInBooking = useCallback(
     async ({
       doctorId,
+      existingPatientId = null,
       patientName,
       patientPhone,
       isPriority,
       paymentMethod,
     }: {
       doctorId: string;
+      existingPatientId?: string | null;
       patientName: string;
       patientPhone: string;
       isPriority: boolean;
-      paymentMethod: "cash" | "kpay" | "wavepay" | "ayapay";
+      paymentMethod: "cash" | "credit_points" | "kpay" | "wavepay" | "ayapay";
     }): Promise<Booking> => {
       const doctor = doctors.find((d) => d.id === doctorId);
       if (!doctor) throw new Error("Doctor not found");
 
-      const cleanedPhone =
-        patientPhone.replace(/\D/g, "") ||
-        `09${Math.floor(100000000 + Math.random() * 900000000)}`;
-      let pat = patients.find(
-        (p) => p.phone.replace(/\D/g, "") === cleanedPhone
-      );
-      const nextPatients = [...patients];
+      const fee = doctor.consultation_fee || settings.defaultFee;
+      let pat: Patient | undefined;
+      let nextPatients = [...patients];
+
+      if (existingPatientId) {
+        pat = patients.find((p) => p.id === existingPatientId);
+      }
 
       if (!pat) {
-        pat = {
-          id: crypto.randomUUID(),
-          phone: cleanedPhone,
-          name: patientName.trim() || `Walk-in (${cleanedPhone.slice(-4)})`,
-          credit_points: 0,
-          fcm_token: null,
-          preferred_language: "my",
-          created_at: new Date().toISOString(),
-        };
-        nextPatients.push(pat);
+        const cleanedPhone =
+          patientPhone.replace(/\D/g, "") ||
+          `09${Math.floor(100000000 + Math.random() * 900000000)}`;
+        pat = patients.find(
+          (p) => p.phone.replace(/\D/g, "") === cleanedPhone
+        );
+        if (!pat) {
+          pat = {
+            id: crypto.randomUUID(),
+            phone: cleanedPhone,
+            name: patientName.trim() || `လူနာ (${cleanedPhone.slice(-4)})`,
+            credit_points: 0,
+            fcm_token: null,
+            preferred_language: "my",
+            created_at: new Date().toISOString(),
+          };
+          nextPatients.push(pat);
+        }
+      }
+
+      if (paymentMethod === "credit_points") {
+        if (pat.credit_points < fee) {
+          throw new Error(
+            lang === "my"
+              ? `လူနာ (${pat.name}) ၏ Credit Points လက်ကျန် မလုံလောက်ပါ။`
+              : `Patient (${pat.name}) does not have enough Credit Points.`
+          );
+        }
+        nextPatients = nextPatients.map((p) =>
+          p.id === pat!.id
+            ? { ...p, credit_points: Math.max(0, p.credit_points - fee) }
+            : p
+        );
       }
 
       const doctorBookingsToday = bookings.filter(
@@ -938,7 +1023,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       );
       const nextQueueNumber = highestBookedQueue + 1;
       const bookingId = crypto.randomUUID();
-      const ticketCode = `${isPriority ? "VIP" : "WK"}-${
+      const ticketCode = `${isPriority ? "VIP" : "RC"}-${
         doctor.room_number
       }-${nextQueueNumber}`;
       const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
@@ -958,6 +1043,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         called_at: null,
         notified_near_at: null,
         qr_image_url: qrDataUrl,
+        cancel_requested: false,
         created_at: new Date().toISOString(),
       };
 
@@ -965,7 +1051,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         id: crypto.randomUUID(),
         patient_id: pat.id,
         booking_id: newBooking.id,
-        amount: doctor.consultation_fee,
+        amount: fee,
         payment_method: paymentMethod,
         receipt_image_url: null,
         type: "payment",
@@ -986,6 +1072,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions: nextTransactions,
         messages,
+        receptionNotifications,
       });
 
       return newBooking;
@@ -996,7 +1083,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       settings,
+      lang,
       persistState,
     ]
   );
@@ -1039,7 +1128,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         };
       });
 
-      // Automated messages for called patient & next 3 patients
       const upcomingBookings = nextBookings
         .filter(
           (b) =>
@@ -1100,6 +1188,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions,
         messages: nextMessages,
+        receptionNotifications,
       });
 
       return {
@@ -1113,6 +1202,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       patients,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       currentPatient,
       lang,
@@ -1154,6 +1244,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions,
         messages,
+        receptionNotifications,
       });
     },
     [
@@ -1162,6 +1253,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
@@ -1200,8 +1292,13 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         ].slice(0, 60);
       }
 
+      const nextRecNotifs = receptionNotifications.map((n) =>
+        n.booking_id === bookingId ? { ...n, is_read: true } : n
+      );
+
       setBookings(nextBookings);
       setMessages(nextMessages);
+      setReceptionNotifications(nextRecNotifs);
 
       persistState({
         settings,
@@ -1210,6 +1307,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions,
         messages: nextMessages,
+        receptionNotifications: nextRecNotifs,
       });
     },
     [
@@ -1218,51 +1316,228 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       patients,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
   );
 
-  const cancelBookingAndRefund = useCallback(
-    async (
-      bookingId: string
-    ): Promise<{ refundedAmount: number; patientName: string }> => {
+  /**
+   * Patient-initiated cancellation request:
+   * - Strictly allowed ONLY when booking is "waiting" AND at least 2 patients are ahead
+   *   (booking.queue_number - doctor.current_queue_number >= 2).
+   * - Does NOT grant credit points until Reception confirms!
+   */
+  const requestPatientBookingCancel = useCallback(
+    async (bookingId: string) => {
       const booking = bookings.find((b) => b.id === bookingId);
       if (!booking) throw new Error("Booking not found");
 
       const doctor = doctors.find((d) => d.id === booking.doctor_id);
-      const refundAmount =
-        doctor?.consultation_fee || settings.defaultFee;
+      const currentServing = doctor?.current_queue_number ?? 0;
+      const patientsAhead = booking.queue_number - currentServing;
+
+      if (booking.status !== "waiting" || patientsAhead < 2) {
+        throw new Error(
+          lang === "my"
+            ? "သင့်အလှည့်ရောက်ရန် နီးကပ်နေပြီ (သို့မဟုတ် အလှည့်ကျော်သွားပြီ) ဖြစ်သဖြင့် ပယ်ဖျက်၍ မရနိုင်တော့ပါ။ အလှည့်မရောက်မီ အနည်းဆုံး လူနာ (၂) ဦး အလိုတွင်သာ ပယ်ဖျက်ခွင့်ရှိပါသည်။"
+            : "Cancellation is only allowed when at least 2 patients are ahead of your turn."
+        );
+      }
+
+      const pat = patients.find((p) => p.id === booking.patient_id);
+      const tx = transactions.find(
+        (t) => t.booking_id === booking.id && t.type === "payment"
+      );
+
+      const nextBookings = bookings.map((b) =>
+        b.id === bookingId
+          ? {
+              ...b,
+              cancel_requested: true,
+              cancel_requested_at: new Date().toISOString(),
+            }
+          : b
+      );
+
+      const newCancelNotif: ReceptionNotification = {
+        id: crypto.randomUUID(),
+        type: "cancel_request",
+        booking_id: booking.id,
+        patient_id: booking.patient_id,
+        patient_name: pat?.name || "Patient",
+        patient_phone: pat?.phone || "",
+        doctor_id: booking.doctor_id,
+        doctor_name_my: doctor?.name_my || doctor?.name || "",
+        doctor_name_en: doctor?.name || "",
+        room_number: doctor?.room_number || "",
+        queue_number: booking.queue_number,
+        payment_method: tx?.payment_method || "kpay",
+        is_read: false,
+        created_at: new Date().toISOString(),
+      };
+
+      const reqMessage: ClinicMessage = {
+        id: crypto.randomUUID(),
+        doctor_id: booking.doctor_id,
+        booking_id: booking.id,
+        patient_id: booking.patient_id,
+        kind: "automated",
+        category: "info",
+        title_my: "ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက် ပေးပို့ထားပါသည်",
+        body_my:
+          "သင်၏ ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက်ကို Reception သို့ ပေးပို့ထားပါသည်။ Reception မှ စစ်ဆေးအတည်ပြုပြီးမှသာ သင့်အကောင့်ထဲသို့ Credit Points ပြန်လည်ဝင်ရောက်ပါမည်။",
+        title_en: "Cancellation Request Sent to Reception",
+        body_en:
+          "Your cancellation request has been sent to Reception. Credit Points will be credited to your account once Reception confirms.",
+        message_date: TODAY_STR,
+        created_at: new Date().toISOString(),
+      };
+
+      const nextMessages = [reqMessage, ...messages].slice(0, 60);
+      const nextRecNotifs = [newCancelNotif, ...receptionNotifications].slice(
+        0,
+        40
+      );
+
+      setBookings(nextBookings);
+      setMessages(nextMessages);
+      setReceptionNotifications(nextRecNotifs);
+
+      persistState({
+        settings,
+        patients,
+        doctors,
+        bookings: nextBookings,
+        transactions,
+        messages: nextMessages,
+        receptionNotifications: nextRecNotifs,
+      });
+    },
+    [
+      bookings,
+      doctors,
+      patients,
+      transactions,
+      messages,
+      receptionNotifications,
+      settings,
+      lang,
+      persistState,
+    ]
+  );
+
+  /**
+   * Reception-controlled cancellation & Credit Points confirmation.
+   * Credit points ONLY enter the patient's account when Reception confirms with `grantCreditPoints: true`.
+   */
+  const cancelBookingAndRefund = useCallback(
+    async (
+      bookingId: string,
+      options?: {
+        grantCreditPoints?: boolean;
+        rejectRequestOnly?: boolean;
+      }
+    ): Promise<{
+      refundedAmount: number;
+      patientName: string;
+      action: "refunded" | "cancelled_no_credit" | "rejected";
+    }> => {
+      const booking = bookings.find((b) => b.id === bookingId);
+      if (!booking) throw new Error("Booking not found");
+
+      const doctor = doctors.find((d) => d.id === booking.doctor_id);
       const patient = patients.find((p) => p.id === booking.patient_id);
+      const grantCreditPoints = options?.grantCreditPoints ?? true;
+      const rejectRequestOnly = options?.rejectRequestOnly ?? false;
+
+      // Case 1: Reception rejects patient's cancel request (booking stays in queue)
+      if (rejectRequestOnly) {
+        const nextBookings = bookings.map((b) =>
+          b.id === bookingId
+            ? { ...b, cancel_requested: false, cancel_requested_at: null }
+            : b
+        );
+        const nextRecNotifs = receptionNotifications.map((n) =>
+          n.booking_id === bookingId ? { ...n, is_read: true } : n
+        );
+        const rejectMsg: ClinicMessage = {
+          id: crypto.randomUUID(),
+          doctor_id: booking.doctor_id,
+          booking_id: booking.id,
+          patient_id: booking.patient_id,
+          kind: "automated",
+          category: "info",
+          title_my: "ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက်ကို လက်မခံပါ",
+          body_my: `သင်၏ အလှည့်နံပါတ် #${booking.queue_number} သည် ဆက်လက် အကျုံးဝင်နေပါသည်။ အသေးစိတ်သိရှိလိုပါက Reception ကောင်တာသို့ ဆက်သွယ်ပါ။`,
+          title_en: "Cancellation Request Declined",
+          body_en: `Your queue booking #${booking.queue_number} remains active. Please contact Reception for assistance.`,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        };
+        const nextMessages = [rejectMsg, ...messages].slice(0, 60);
+
+        setBookings(nextBookings);
+        setMessages(nextMessages);
+        setReceptionNotifications(nextRecNotifs);
+
+        persistState({
+          settings,
+          patients,
+          doctors,
+          bookings: nextBookings,
+          transactions,
+          messages: nextMessages,
+          receptionNotifications: nextRecNotifs,
+        });
+
+        return {
+          refundedAmount: 0,
+          patientName: patient?.name || "Patient",
+          action: "rejected",
+        };
+      }
+
+      // Case 2: Reception cancels booking (with or without Credit Points)
+      const refundAmount = grantCreditPoints
+        ? doctor?.consultation_fee || settings.defaultFee
+        : 0;
 
       const nextBookings = bookings.map((b) =>
         b.id === bookingId
           ? {
               ...b,
               status: "cancelled" as const,
-              payment_status: "refunded" as const,
+              payment_status: grantCreditPoints
+                ? ("refunded" as const)
+                : ("void" as const),
+              cancel_requested: false,
             }
           : b
       );
 
-      const nextPatients = patients.map((p) =>
-        p.id === booking.patient_id
-          ? { ...p, credit_points: p.credit_points + refundAmount }
-          : p
-      );
+      const nextPatients = grantCreditPoints
+        ? patients.map((p) =>
+            p.id === booking.patient_id
+              ? { ...p, credit_points: p.credit_points + refundAmount }
+              : p
+          )
+        : patients;
 
-      const refundTransaction: Transaction = {
-        id: crypto.randomUUID(),
-        patient_id: booking.patient_id,
-        booking_id: booking.id,
-        amount: refundAmount,
-        payment_method: "refund" as PaymentMethod,
-        receipt_image_url: null,
-        type: "refund",
-        created_at: new Date().toISOString(),
-      };
-
-      const nextTransactions = [refundTransaction, ...transactions];
+      let nextTransactions = [...transactions];
+      if (grantCreditPoints && refundAmount > 0) {
+        const refundTransaction: Transaction = {
+          id: crypto.randomUUID(),
+          patient_id: booking.patient_id,
+          booking_id: booking.id,
+          amount: refundAmount,
+          payment_method: "refund" as PaymentMethod,
+          receipt_image_url: null,
+          type: "refund",
+          created_at: new Date().toISOString(),
+        };
+        nextTransactions = [refundTransaction, ...transactions];
+      }
 
       let nextMessages = [...messages];
       if (doctor) {
@@ -1290,10 +1565,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         ].slice(0, 60);
       }
 
+      const nextRecNotifs = receptionNotifications.map((n) =>
+        n.booking_id === bookingId ? { ...n, is_read: true } : n
+      );
+
       setBookings(nextBookings);
       setPatients(nextPatients);
       setTransactions(nextTransactions);
       setMessages(nextMessages);
+      setReceptionNotifications(nextRecNotifs);
 
       persistState({
         settings,
@@ -1302,11 +1582,13 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions: nextTransactions,
         messages: nextMessages,
+        receptionNotifications: nextRecNotifs,
       });
 
       return {
         refundedAmount: refundAmount,
         patientName: patient?.name || "Patient",
+        action: grantCreditPoints ? "refunded" : "cancelled_no_credit",
       };
     },
     [
@@ -1315,10 +1597,65 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       patients,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
   );
+
+  const markReceptionNotificationRead = useCallback(
+    async (notificationId: string) => {
+      const nextRecNotifs = receptionNotifications.map((n) =>
+        n.id === notificationId ? { ...n, is_read: true } : n
+      );
+      setReceptionNotifications(nextRecNotifs);
+      persistState({
+        settings,
+        patients,
+        doctors,
+        bookings,
+        transactions,
+        messages,
+        receptionNotifications: nextRecNotifs,
+      });
+    },
+    [
+      receptionNotifications,
+      settings,
+      patients,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      persistState,
+    ]
+  );
+
+  const clearReceptionNotifications = useCallback(async () => {
+    const nextRecNotifs = receptionNotifications.map((n) => ({
+      ...n,
+      is_read: true,
+    }));
+    setReceptionNotifications(nextRecNotifs);
+    persistState({
+      settings,
+      patients,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      receptionNotifications: nextRecNotifs,
+    });
+  }, [
+    receptionNotifications,
+    settings,
+    patients,
+    doctors,
+    bookings,
+    transactions,
+    messages,
+    persistState,
+  ]);
 
   const addDoctor = useCallback(
     async (input: DoctorFormInput): Promise<Doctor> => {
@@ -1356,6 +1693,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
       return newDoc;
     },
@@ -1365,6 +1703,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
@@ -1392,6 +1731,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
     },
     [
@@ -1400,6 +1740,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
@@ -1416,6 +1757,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
     },
     [
@@ -1424,6 +1766,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
@@ -1547,6 +1890,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings: nextBookings,
         transactions,
         messages: nextMessages,
+        receptionNotifications,
       });
     },
     [
@@ -1555,6 +1899,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       patients,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
@@ -1605,11 +1950,21 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages: nextMessages,
+        receptionNotifications,
       });
 
       return msg;
     },
-    [messages, patients, doctors, bookings, transactions, settings, persistState]
+    [
+      messages,
+      patients,
+      doctors,
+      bookings,
+      transactions,
+      receptionNotifications,
+      settings,
+      persistState,
+    ]
   );
 
   const addDemoCreditPoints = useCallback(
@@ -1628,6 +1983,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
     },
     [
@@ -1637,6 +1993,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       settings,
       persistState,
     ]
@@ -1660,6 +2017,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
     },
     [
@@ -1669,6 +2027,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       persistState,
     ]
   );
@@ -1693,6 +2052,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
       return true;
     },
@@ -1703,6 +2063,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       persistState,
     ]
   );
@@ -1727,6 +2088,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
       return true;
     },
@@ -1737,6 +2099,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       persistState,
     ]
   );
@@ -1755,6 +2118,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
       });
     },
     [
@@ -1764,6 +2128,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      receptionNotifications,
       persistState,
     ]
   );
@@ -1774,6 +2139,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     setBookings(INITIAL_BOOKINGS);
     setTransactions(INITIAL_TRANSACTIONS);
     setMessages(INITIAL_MESSAGES);
+    setReceptionNotifications([]);
     persistState({
       settings,
       patients: INITIAL_PATIENTS,
@@ -1781,6 +2147,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings: INITIAL_BOOKINGS,
       transactions: INITIAL_TRANSACTIONS,
       messages: INITIAL_MESSAGES,
+      receptionNotifications: [],
     });
   }, [settings, persistState]);
 
@@ -1796,6 +2163,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         bookings,
         transactions,
         messages,
+        receptionNotifications,
         currentPatient,
         isLoading,
         isRealtimeConnected,
@@ -1806,7 +2174,10 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         advanceDoctorQueue,
         setCustomQueueNumber,
         verifyReceiptAndConfirmBooking,
+        requestPatientBookingCancel,
         cancelBookingAndRefund,
+        markReceptionNotificationRead,
+        clearReceptionNotifications,
         addDoctor,
         updateDoctor,
         removeDoctor,

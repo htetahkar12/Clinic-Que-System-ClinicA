@@ -48,7 +48,7 @@ export default function PatientPortalPage() {
     currentPatient,
     loginWithPhoneOtp,
     createBooking,
-    cancelBookingAndRefund,
+    requestPatientBookingCancel,
   } = useClinic();
 
   // Onboarding State — Blank by default, zero visible password/OTP hints
@@ -278,24 +278,20 @@ export default function PatientPortalPage() {
   };
 
   const handlePatientCancelBooking = async (bookingId: string) => {
-    const res = await cancelBookingAndRefund(bookingId);
-    if (res.refundedAmount > 0) {
+    try {
+      await requestPatientBookingCancel(bookingId);
       setCancelNotice(
         lang === "my"
-          ? `သင့်ရက်ချိန်းကို ပယ်ဖျက်ပြီးပါပြီ။ စမ်းသပ်ခ ${formatCurrency(
-              res.refundedAmount,
-              "my"
-            )} ကို နောက်တစ်ကြိမ် အသုံးပြုနိုင်ရန် Credit Points အဖြစ် သင့်အကောင့်ထဲသို့ အလိုအလျောက် ပြန်ထည့်ပေးထားပါသည်။`
-          : `Your booking has been canceled. ${formatCurrency(
-              res.refundedAmount,
-              "en"
-            )} has been automatically credited to your Credit Points balance.`
+          ? "ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက်ကို Reception သို့ ပေးပို့ပြီးပါပြီ။ Reception မှ အတည်ပြုပြီးမှသာ သင့်အကောင့်ထဲသို့ Credit Points ဝင်ရောက်ပါမည်။"
+          : "Your cancellation request has been sent to Reception. Credit Points will be added to your account once Reception confirms."
       );
-    } else {
+    } catch (err) {
       setCancelNotice(
-        lang === "my"
-          ? "သင့်ရက်ချိန်းကို ပယ်ဖျက်ပြီးပါပြီ။"
-          : "Your booking has been canceled."
+        err instanceof Error
+          ? err.message
+          : lang === "my"
+          ? "အလှည့်ရောက်ရန် နီးကပ်နေပြီဖြစ်သဖြင့် ပယ်ဖျက်၍ မရနိုင်တော့ပါ။"
+          : "Cannot cancel booking at this stage."
       );
     }
   };
@@ -965,20 +961,51 @@ export default function PatientPortalPage() {
           </div>
         </div>
 
-        {/* Smart Credit Cancellation Option (No-Refund Policy -> Credit Points) */}
-        {!isPassedOrCompleted && (
-          <div className="mt-5 rounded-3xl border-2 border-slate-200 bg-slate-50 p-5">
+        {/* Strict Credit Point Cancellation Policy Card (2-Patients-Ahead Rule + Reception Confirmation Required) */}
+        <div className="mt-5 rounded-3xl border-2 border-slate-200 bg-slate-50 p-5">
+          {cancelNotice && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border-2 border-blue-700 bg-blue-50 p-3.5 text-sm font-extrabold text-blue-950">
+              <span>{cancelNotice}</span>
+              <button
+                type="button"
+                onClick={() => setCancelNotice(null)}
+                className="shrink-0 rounded-lg border border-blue-700 px-2.5 py-1 text-xs font-black"
+              >
+                OK
+              </button>
+            </div>
+          )}
+
+          {activeBooking.cancel_requested ? (
+            <div className="rounded-2xl border-2 border-amber-600 bg-amber-50 p-4 text-amber-950">
+              <div className="flex items-start gap-3">
+                <Clock className="mt-0.5 h-6 w-6 shrink-0 text-amber-700" />
+                <div>
+                  <h4 className="text-base font-black sm:text-lg">
+                    {lang === "my"
+                      ? "ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက် ပေးပို့ထားပြီးပါပြီ (Reception အတည်ပြုချက် စောင့်ဆိုင်းနေဆဲ)"
+                      : "Cancellation Requested (Waiting for Reception Confirmation)"}
+                  </h4>
+                  <p className="mt-1 text-sm font-bold text-amber-900">
+                    {lang === "my"
+                      ? "ဆေးခန်း Reception ကောင်တာမှ သင့်တောင်းဆိုချက်ကို စစ်ဆေးအတည်ပြုပြီးမှသာ စမ်းသပ်ခ ပွိုင့် (Credit Points) များ သင့်အကောင့်ထဲသို့ ဝင်ရောက်ပါမည်။"
+                      : "Your Credit Points will be credited to your account once Reception reviews and confirms your cancellation request."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : activeBooking.status === "waiting" && patientsAhead >= 2 ? (
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div>
                 <h4 className="text-base font-black text-slate-900">
                   {lang === "my"
-                    ? "ယနေ့ မလာရောက်နိုင်တော့ပါက ရက်ချိန်းပယ်ဖျက်နိုင်ပါသည်"
+                    ? "ယနေ့ မလာရောက်နိုင်တော့ပါက ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုနိုင်ပါသည်"
                     : "Need to Cancel Today's Visit?"}
                 </h4>
                 <p className="mt-0.5 text-sm font-bold text-slate-600">
                   {lang === "my"
-                    ? "ပေးသွင်းထားသော စမ်းသပ်ခကို နောက်တစ်ကြိမ် ချက်ချင်းပြန်သုံးနိုင်ရန် Credit Points အဖြစ် အပြည့်အဝ ပြောင်းလဲပေးပါမည်။"
-                    : "100% of your paid fee is converted into Credit Points for your next visit."}
+                    ? "သင့်အလှည့်မရောက်မီ အနည်းဆုံး လူနာ (၂) ဦး အလိုတွင်သာ ပယ်ဖျက်ခွင့်ရှိပြီး၊ Reception မှ အတည်ပြုပြီးမှသာ သင့်အကောင့်ထဲသို့ Credit Points ပြန်ဝင်ပါမည်။"
+                    : "You may request cancellation when at least 2 patients are ahead of you. Credit Points are added after Reception confirms."}
                 </p>
               </div>
               <button
@@ -989,13 +1016,31 @@ export default function PatientPortalPage() {
                 <XCircle className="h-4 w-4" />
                 <span>
                   {lang === "my"
-                    ? "ရက်ချိန်းပယ်ဖျက်ပြီး ပွိုင့်ပြန်ယူမည်"
-                    : "Cancel & Convert to Credit"}
+                    ? "ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုမည်"
+                    : "Request Cancellation"}
                 </span>
               </button>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="rounded-2xl border-2 border-slate-300 bg-slate-100 p-4 text-slate-800">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-slate-600" />
+                <div>
+                  <h4 className="text-sm font-black sm:text-base">
+                    {lang === "my"
+                      ? "ရက်ချိန်းပယ်ဖျက်၍ မရနိုင်တော့ပါ (အနည်းဆုံး လူနာ ၂ ဦး အလိုတွင်သာ ပယ်ဖျက်နိုင်ပါသည်)"
+                      : "Cancellation Locked (Requires At Least 2 Patients Ahead)"}
+                  </h4>
+                  <p className="mt-1 text-xs font-bold text-slate-600 sm:text-sm">
+                    {lang === "my"
+                      ? "စည်းကမ်းချက်အရ မိမိအလှည့်ရောက်ရန် အနည်းဆုံး (၂) ယောက်အလို မတိုင်မီတွင်သာ ပယ်ဖျက်ခွင့်ရှိပါသည်။ ပြခါနီးအချိန် သို့မဟုတ် မိမိနံပါတ် ကျော်သွားပြီးမှ ပယ်ဖျက်၍ ပွိုင့်ပြန်ယူခြင်း မပြုလုပ်နိုင်ပါ။"
+                      : "Per clinic policy, cancellations must be requested at least 2 turns before your queue number. Near-turn or passed numbers cannot be canceled."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

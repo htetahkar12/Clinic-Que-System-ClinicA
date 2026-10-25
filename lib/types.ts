@@ -93,6 +93,25 @@ export interface Booking {
   called_at: string | null;
   notified_near_at: string | null;
   qr_image_url: string | null;
+  cancel_requested?: boolean;
+  cancel_requested_at?: string | null;
+  created_at: string;
+}
+
+export interface ReceptionNotification {
+  id: string;
+  type: "new_booking" | "cancel_request" | "booking_cancelled";
+  booking_id: string;
+  patient_id: string;
+  patient_name: string;
+  patient_phone: string;
+  doctor_id: string;
+  doctor_name_my: string;
+  doctor_name_en: string;
+  room_number: string;
+  queue_number: number;
+  payment_method: string;
+  is_read: boolean;
   created_at: string;
 }
 

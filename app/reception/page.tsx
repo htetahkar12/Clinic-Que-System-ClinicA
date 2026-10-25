@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useClinic, DoctorFormInput } from "@/lib/clinic-store";
 import { Doctor, DoctorStatus } from "@/lib/types";
@@ -33,6 +33,7 @@ import {
   Hash,
   MessageSquarePlus,
   KeyRound,
+  AlertTriangle,
 } from "lucide-react";
 
 const STAFF_AUTH_STORAGE_KEY = "auracare_staff_authenticated_v2";
@@ -46,10 +47,13 @@ export default function ReceptionCommandCenterPage() {
     bookings,
     transactions,
     messages,
+    receptionNotifications,
     advanceDoctorQueue,
     setCustomQueueNumber,
     verifyReceiptAndConfirmBooking,
     cancelBookingAndRefund,
+    markReceptionNotificationRead,
+    clearReceptionNotifications,
     addDoctor,
     updateDoctor,
     removeDoctor,
@@ -113,17 +117,58 @@ export default function ReceptionCommandCenterPage() {
   );
   const [overrideQueueValue, setOverrideQueueValue] = useState<number>(1);
 
-  // 4. VIP / Walk-In Patient Registration Modal State
+  // 4. Reception Desk Full Booking / Walk-In / VIP Registration Modal State
   const [walkInModalDoctor, setWalkInModalDoctor] = useState<Doctor | null>(
     null
   );
+  const [walkInPatientMode, setWalkInPatientMode] = useState<"new" | "existing">(
+    "new"
+  );
+  const [walkInExistingPatientId, setWalkInExistingPatientId] =
+    useState<string>("");
   const [walkInName, setWalkInName] = useState("");
   const [walkInPhone, setWalkInPhone] = useState("");
   const [walkInPriority, setWalkInPriority] = useState(false);
-  const [walkInPayment] = useState<"cash" | "kpay" | "wavepay" | "ayapay">(
-    "cash"
-  );
+  const [walkInPayment, setWalkInPayment] = useState<
+    "cash" | "credit_points" | "kpay" | "wavepay" | "ayapay"
+  >("cash");
   const [createdTicketId, setCreatedTicketId] = useState<string | null>(null);
+
+  // Audio Chime when a new unread Reception Notification arrives (New Booking or Cancel Request)
+  const unreadNotifications = receptionNotifications.filter((n) => !n.is_read);
+  const prevUnreadCountRef = useRef<number>(unreadNotifications.length);
+
+  useEffect(() => {
+    if (
+      isStaffAuthed &&
+      unreadNotifications.length > prevUnreadCountRef.current &&
+      typeof window !== "undefined"
+    ) {
+      try {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.14);
+          gain.gain.setValueAtTime(0.18, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.45);
+        }
+      } catch {
+        // Ignore audio context autoplay restrictions
+      }
+    }
+    prevUnreadCountRef.current = unreadNotifications.length;
+  }, [unreadNotifications.length, isStaffAuthed]);
 
   // 5. Manual Broadcast Message Modal State
   const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
@@ -375,19 +420,50 @@ export default function ReceptionCommandCenterPage() {
     setOverrideModalDoctor(null);
   };
 
+  const openReceptionBookingModal = (defaultDoctor?: Doctor) => {
+    const doc =
+      defaultDoctor || doctors.find((d) => !d.is_archived) || doctors[0] || null;
+    setWalkInModalDoctor(doc);
+    setWalkInPatientMode("new");
+    setWalkInExistingPatientId(patients[0]?.id || "");
+    setWalkInName("");
+    setWalkInPhone("");
+    setWalkInPriority(false);
+    setWalkInPayment("cash");
+    setCreatedTicketId(null);
+  };
+
   const handleCreateWalkIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!walkInModalDoctor || !walkInName.trim()) return;
+    if (!walkInModalDoctor) return;
+    const selectedExisting =
+      walkInPatientMode === "existing"
+        ? patients.find((p) => p.id === walkInExistingPatientId)
+        : undefined;
+
+    if (walkInPatientMode === "new" && !walkInName.trim()) return;
+    if (walkInPatientMode === "existing" && !selectedExisting) return;
+
     const booking = await createWalkInBooking({
       doctorId: walkInModalDoctor.id,
-      patientName: walkInName.trim(),
-      patientPhone: walkInPhone.trim() || "0900000000",
+      patientName:
+        walkInPatientMode === "existing"
+          ? selectedExisting!.name
+          : walkInName.trim(),
+      patientPhone:
+        walkInPatientMode === "existing"
+          ? selectedExisting!.phone
+          : walkInPhone.trim() || "0900000000",
+      existingPatientId:
+        walkInPatientMode === "existing" ? selectedExisting!.id : null,
       isPriority: walkInPriority,
       paymentMethod: walkInPayment,
     });
     setCreatedTicketId(booking.id);
+    const displayPatName =
+      walkInPatientMode === "existing" ? selectedExisting!.name : walkInName;
     setLastAnnouncement(
-      `ပြင်ပလူနာ (${walkInName}) အတွက် အလှည့်နံပါတ် #${booking.queue_number} နှင့် QR လက်မှတ် ထုတ်ပေးပြီးပါပြီ။`
+      `လူနာ (${displayPatName}) အတွက် အလှည့်နံပါတ် #${booking.queue_number} နှင့် QR လက်မှတ်ကို Reception မှ အောင်မြင်စွာ ထုတ်ပေးပြီးပါပြီ။`
     );
   };
 
@@ -412,13 +488,28 @@ export default function ReceptionCommandCenterPage() {
     setBroadcastBodyEn("");
   };
 
-  const handleCancelAndRefund = async (bookingId: string) => {
-    const res = await cancelBookingAndRefund(bookingId);
+  const handleCancelAndRefund = async (
+    bookingId: string,
+    options?: { grantCreditPoints?: boolean; rejectRequestOnly?: boolean }
+  ) => {
+    const res = await cancelBookingAndRefund(bookingId, options);
+    if (options?.rejectRequestOnly) {
+      setLastAnnouncement(
+        `${res.patientName} ၏ ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက်ကို ငြင်းပယ်ပြီး မူလအလှည့်နံပါတ်အတိုင်း ဆက်လက်ထားရှိပါသည်။`
+      );
+      return;
+    }
+    if (options?.grantCreditPoints === false) {
+      setLastAnnouncement(
+        `${res.patientName} ၏ ရက်ချိန်းကို Credit Points ပြန်မသွင်းဘဲ ပယ်ဖျက်ပြီးပါပြီ။`
+      );
+      return;
+    }
     setLastAnnouncement(
-      `${res.patientName} ၏ ရက်ချိန်းကို ပယ်ဖျက်ပြီး ${formatCurrency(
+      `${res.patientName} ၏ ရက်ချိန်းပယ်ဖျက်မှုကို Reception မှ အတည်ပြုပြီး ${formatCurrency(
         res.refundedAmount,
         lang
-      )} ကို Credit Points အဖြစ် အလိုအလျောက် ပြောင်းပေးပြီးပါပြီ။`
+      )} ကို လူနာအကောင့်ထဲသို့ Credit Points အဖြစ် ထည့်သွင်းပေးပြီးပါပြီ။`
     );
   };
 
@@ -458,6 +549,19 @@ export default function ReceptionCommandCenterPage() {
 
           {/* Primary Action Toolbar */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openReceptionBookingModal()}
+              className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2 text-xs font-black text-white shadow-md hover:opacity-95 sm:text-sm"
+            >
+              <UserPlus className="h-4 w-4 sm:h-5 sm:w-5" />
+              <span>
+                {lang === "my"
+                  ? "+ လူနာ Booking တင်ပေးရန်"
+                  : "+ Book Patient Queue"}
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={openAddDoctorModal}
@@ -542,6 +646,171 @@ export default function ReceptionCommandCenterPage() {
           </div>
         </div>
       </div>
+
+      {/* =====================================================================
+          PROMINENT REAL-TIME RECEPTION NOTIFICATION CENTER (BOOKINGS & CANCELS)
+      ===================================================================== */}
+      {unreadNotifications.length > 0 && (
+        <div className="mb-6 overflow-hidden rounded-3xl border-4 border-amber-500 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 p-4 shadow-xl sm:p-6">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-600 text-white shadow-md">
+                <BellRing className="h-6 w-6 animate-bounce" />
+              </span>
+              <div>
+                <h2 className="text-base font-black text-slate-950 sm:text-xl">
+                  {lang === "my"
+                    ? `အရေးကြီး တိုက်ရိုက် အသိပေးချက်များ (${unreadNotifications.length})`
+                    : `Live Patient Booking & Cancel Notifications (${unreadNotifications.length})`}
+                </h2>
+                <p className="text-xs font-bold text-amber-950 sm:text-sm">
+                  {lang === "my"
+                    ? "လူနာအသစ် Booking တင်ခြင်းနှင့် ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုချက်များ ချက်ချင်းပေါ်လာပါသည်။"
+                    : "Real-time alerts when patients book an appointment or request cancellation."}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => clearReceptionNotifications()}
+              className="rounded-xl border-2 border-slate-900 bg-white px-3.5 py-2 text-xs font-black text-slate-950 hover:bg-slate-100 sm:text-sm"
+            >
+              {lang === "my" ? "အားလုံး ဖတ်ပြီး (Clear All)" : "Dismiss All"}
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {unreadNotifications.map((notif) => {
+              const relatedBooking = bookings.find(
+                (b) => b.id === notif.booking_id
+              );
+              const isPendingCancel =
+                notif.type === "cancel_request" &&
+                relatedBooking &&
+                relatedBooking.status === "waiting" &&
+                relatedBooking.cancel_requested;
+
+              return (
+                <div
+                  key={notif.id}
+                  className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-4 shadow-sm lg:flex-row lg:items-center ${
+                    notif.type === "cancel_request"
+                      ? "border-red-700 bg-red-50 text-red-950"
+                      : "border-emerald-700 bg-white text-slate-950"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-lg px-2.5 py-0.5 text-xs font-black uppercase text-white ${
+                          notif.type === "cancel_request"
+                            ? "bg-red-700"
+                            : "bg-emerald-700"
+                        }`}
+                      >
+                        {notif.type === "cancel_request"
+                          ? lang === "my"
+                            ? "ပယ်ဖျက်ရန် တောင်းဆိုချက်"
+                            : "CANCEL REQUEST"
+                          : lang === "my"
+                          ? "BOOKING အသစ်ဝင်သည်"
+                          : "NEW BOOKING"}
+                      </span>
+                      <span className="font-mono text-xs font-black text-slate-700">
+                        Queue #{notif.queue_number}
+                      </span>
+                      <span className="text-xs font-bold text-slate-600">
+                        {new Date(notif.created_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-black sm:text-lg">
+                      {notif.type === "cancel_request"
+                        ? lang === "my"
+                          ? `${notif.patient_name} (${notif.patient_phone}) မှ ရက်ချိန်းပယ်ဖျက်ရန် တောင်းဆိုထားပါသည်`
+                          : `${notif.patient_name} (${notif.patient_phone}) requested cancellation`
+                        : lang === "my"
+                        ? `လူနာအသစ် ${notif.patient_name} (${notif.patient_phone}) Booking တင်ထားပါသည်`
+                        : `New Booking: ${notif.patient_name} (${notif.patient_phone})`}
+                    </h3>
+                    <p className="text-sm font-bold">
+                      {lang === "my"
+                        ? `${notif.doctor_name_my} (အခန်း ${notif.room_number}) • အလှည့်နံပါတ် #${notif.queue_number} • ငွေပေးချေမှု: ${notif.payment_method.toUpperCase()}`
+                        : `${notif.doctor_name_en} (Room ${notif.room_number}) • Queue #${notif.queue_number} • Payment: ${notif.payment_method.toUpperCase()}`}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isPendingCancel && relatedBooking && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCancelAndRefund(relatedBooking.id, {
+                              grantCreditPoints: true,
+                            })
+                          }
+                          className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-black text-white shadow-sm hover:bg-emerald-800 sm:text-sm"
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>
+                            {lang === "my"
+                              ? "အတည်ပြု + Credit ပွိုင့်သွင်းမည်"
+                              : "Confirm & Credit Points"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCancelAndRefund(relatedBooking.id, {
+                              grantCreditPoints: false,
+                            })
+                          }
+                          className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border-2 border-red-800 bg-white px-3 py-2 text-xs font-black text-red-900 hover:bg-red-100 sm:text-sm"
+                        >
+                          <XCircle className="h-4 w-4" />
+                          <span>
+                            {lang === "my"
+                              ? "ပွိုင့်မသွင်းဘဲ ဖျက်မည်"
+                              : "Cancel Without Credit"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCancelAndRefund(relatedBooking.id, {
+                              rejectRequestOnly: true,
+                            })
+                          }
+                          className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border-2 border-slate-400 bg-white px-3 py-2 text-xs font-black text-slate-800 hover:bg-slate-100 sm:text-sm"
+                        >
+                          <span>
+                            {lang === "my"
+                              ? "တောင်းဆိုချက် ငြင်းပယ်မည်"
+                              : "Reject Request"}
+                          </span>
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => markReceptionNotificationRead(notif.id)}
+                      className="inline-flex min-h-[42px] items-center gap-1 rounded-xl border-2 border-slate-900 bg-slate-900 px-3.5 py-2 text-xs font-black text-white hover:bg-slate-800 sm:text-sm"
+                    >
+                      <Check className="h-4 w-4" />
+                      <span>{lang === "my" ? "သိရှိပြီ" : "Acknowledge"}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Live Action Feedback Toast */}
       {lastAnnouncement && (
@@ -679,20 +948,14 @@ export default function ReceptionCommandCenterPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setWalkInModalDoctor(doctor);
-                      setWalkInName("");
-                      setWalkInPhone("");
-                      setWalkInPriority(false);
-                      setCreatedTicketId(null);
-                    }}
+                    onClick={() => openReceptionBookingModal(doctor)}
                     className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border-2 border-indigo-700 bg-indigo-50 px-2.5 py-1.5 text-xs font-black text-indigo-950 hover:bg-indigo-100"
                   >
                     <UserPlus className="h-3.5 w-3.5" />
                     <span>
                       {lang === "my"
-                        ? "+ ပြင်ပလူနာ / VIP"
-                        : "+ Walk-In / VIP"}
+                        ? "+ လူနာ Booking တင်ပေးရန်"
+                        : "+ Book Patient"}
                     </span>
                   </button>
 
@@ -768,7 +1031,7 @@ export default function ReceptionCommandCenterPage() {
                       : "No active bookings waiting."}
                   </p>
                 ) : (
-                  <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                     {doctorQueue.map((booking) => {
                       const pat = patients.find(
                         (p) => p.id === booking.patient_id
@@ -778,49 +1041,127 @@ export default function ReceptionCommandCenterPage() {
                       return (
                         <div
                           key={booking.id}
-                          className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 px-3 py-2 text-sm ${
-                            isServing
+                          className={`flex flex-col gap-2 rounded-2xl border-2 px-3 py-2.5 text-sm ${
+                            booking.cancel_requested
+                              ? "border-red-700 bg-red-50 font-black text-red-950"
+                              : isServing
                               ? "border-emerald-700 bg-emerald-50 font-black text-emerald-950"
                               : "border-slate-200 bg-slate-50 font-bold text-slate-900"
                           }`}
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="text-base font-black">
-                              #{booking.queue_number}
-                            </span>
-                            <span>{pat?.name || "Patient"}</span>
-                            {booking.is_priority && (
-                              <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-200 px-1.5 py-0.5 text-[10px] font-black text-amber-950">
-                                <Crown className="h-3 w-3" /> VIP
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-base font-black">
+                                #{booking.queue_number}
                               </span>
-                            )}
+                              <span>{pat?.name || "Patient"}</span>
+                              {booking.is_priority && (
+                                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-200 px-1.5 py-0.5 text-[10px] font-black text-amber-950">
+                                  <Crown className="h-3 w-3" /> VIP
+                                </span>
+                              )}
+                              {booking.cancel_requested && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-red-700 px-2 py-0.5 text-[11px] font-black text-white">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {lang === "my"
+                                    ? "ပယ်ဖျက်ရန် တောင်းဆိုထားသည်"
+                                    : "CANCEL REQUESTED"}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Link
+                                href={`/ticket/${booking.id}`}
+                                title="Open QR Ticket"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-800 hover:bg-slate-100"
+                              >
+                                <QrCode className="h-3.5 w-3.5 text-clinic-primary" />
+                                <span>QR</span>
+                              </Link>
+                              <span
+                                className={`rounded-lg px-2 py-1 text-xs font-black uppercase ${
+                                  booking.payment_status === "paid"
+                                    ? "bg-emerald-700 text-white"
+                                    : "bg-amber-400 text-slate-950"
+                                }`}
+                              >
+                                {booking.payment_status === "paid"
+                                  ? lang === "my"
+                                    ? "ပေးပြီး"
+                                    : "PAID"
+                                  : lang === "my"
+                                  ? "စစ်ဆေးရန်"
+                                  : "PENDING"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCancelAndRefund(booking.id, {
+                                    grantCreditPoints: true,
+                                  })
+                                }
+                                title="Cancel & Refund Credit Points"
+                                className="inline-flex items-center gap-1 rounded-lg border border-red-700 bg-white px-2 py-1 text-xs font-black text-red-800 hover:bg-red-100"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                <span>
+                                  {lang === "my"
+                                    ? "ဖျက် + ပွိုင့်ပေး"
+                                    : "Cancel+Credit"}
+                                </span>
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <Link
-                              href={`/ticket/${booking.id}`}
-                              title="Open QR Ticket"
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-black text-slate-800 hover:bg-slate-100"
-                            >
-                              <QrCode className="h-3.5 w-3.5 text-clinic-primary" />
-                              <span>QR</span>
-                            </Link>
-                            <span
-                              className={`rounded-lg px-2 py-1 text-xs font-black uppercase ${
-                                booking.payment_status === "paid"
-                                  ? "bg-emerald-700 text-white"
-                                  : "bg-amber-400 text-slate-950"
-                              }`}
-                            >
-                              {booking.payment_status === "paid"
-                                ? lang === "my"
-                                  ? "ပေးပြီး"
-                                  : "PAID"
-                                : lang === "my"
-                                ? "စစ်ဆေးရန်"
-                                : "PENDING"}
-                            </span>
-                          </div>
+                          {booking.cancel_requested && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-red-200 pt-2">
+                              <span className="text-xs font-extrabold text-red-900">
+                                {lang === "my"
+                                  ? "လူနာမှ ပယ်ဖျက်ရန် တောင်းဆိုထားပါသည် (Reception အတည်ပြုမှ ပွိုင့်ဝင်ပါမည်)"
+                                  : "Patient requested cancel (Confirm to grant Credit Points)"}
+                              </span>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCancelAndRefund(booking.id, {
+                                      grantCreditPoints: true,
+                                    })
+                                  }
+                                  className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-black text-white hover:bg-emerald-800"
+                                >
+                                  {lang === "my"
+                                    ? "အတည်ပြု + ပွိုင့်သွင်းမည်"
+                                    : "Approve & Credit"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCancelAndRefund(booking.id, {
+                                      grantCreditPoints: false,
+                                    })
+                                  }
+                                  className="rounded-lg border border-red-800 bg-white px-2.5 py-1 text-xs font-black text-red-900 hover:bg-red-100"
+                                >
+                                  {lang === "my"
+                                    ? "ပွိုင့်မပေးဘဲ ဖျက်မည်"
+                                    : "Cancel No Credit"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCancelAndRefund(booking.id, {
+                                      rejectRequestOnly: true,
+                                    })
+                                  }
+                                  className="rounded-lg border border-slate-400 bg-white px-2.5 py-1 text-xs font-black text-slate-800 hover:bg-slate-100"
+                                >
+                                  {lang === "my" ? "ငြင်းပယ်မည်" : "Reject"}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -989,16 +1330,59 @@ export default function ReceptionCommandCenterPage() {
                     </button>
                   )}
 
+                  {booking.cancel_requested && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCancelAndRefund(booking.id, {
+                          rejectRequestOnly: true,
+                        })
+                      }
+                      className="flex min-h-[44px] items-center gap-1.5 rounded-xl border-2 border-slate-400 bg-white px-3 py-2 text-xs font-black text-slate-800 hover:bg-slate-100 sm:text-sm"
+                    >
+                      <span>
+                        {lang === "my"
+                          ? "ပယ်ဖျက်ခွင့် ငြင်းပယ်မည်"
+                          : "Reject Cancel Request"}
+                      </span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => handleCancelAndRefund(booking.id)}
+                    onClick={() =>
+                      handleCancelAndRefund(booking.id, {
+                        grantCreditPoints: true,
+                      })
+                    }
+                    className="flex min-h-[44px] items-center gap-2 rounded-xl border-2 border-emerald-800 bg-emerald-50 px-3.5 py-2 text-xs font-black text-emerald-950 hover:bg-emerald-100 sm:text-sm"
+                  >
+                    <RefreshCw className="h-4 w-4 text-emerald-700" />
+                    <span>
+                      {booking.cancel_requested
+                        ? lang === "my"
+                          ? "ပယ်ဖျက်မှု အတည်ပြု + Credit ပွိုင့်သွင်းမည်"
+                          : "Confirm Cancel & Credit Points"
+                        : lang === "my"
+                        ? "ပယ်ဖျက်ပြီး Credit ပွိုင့်သွင်းပေးမည်"
+                        : "Cancel & Grant Credit Points"}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCancelAndRefund(booking.id, {
+                        grantCreditPoints: false,
+                      })
+                    }
                     className="flex min-h-[44px] items-center gap-2 rounded-xl border-2 border-red-700 bg-red-50 px-3.5 py-2 text-xs font-black text-red-900 hover:bg-red-100 sm:text-sm"
                   >
-                    <RefreshCw className="h-4 w-4" />
+                    <XCircle className="h-4 w-4" />
                     <span>
                       {lang === "my"
-                        ? "ပယ်ဖျက်ပြီး Credit ပြောင်းပေးမည်"
-                        : "Cancel & Credit Refund"}
+                        ? "ပွိုင့်မသွင်းဘဲ ပယ်ဖျက်မည်"
+                        : "Cancel (No Credit)"}
                     </span>
                   </button>
                 </div>
@@ -1439,24 +1823,38 @@ export default function ReceptionCommandCenterPage() {
       )}
 
       {/* =====================================================================
-          MODAL 4: WALK-IN / VIP PATIENT INSERTION & QR GENERATOR MODAL
+          MODAL 4: RECEPTION FULL PATIENT BOOKING & VIP REGISTRATION MODAL
       ===================================================================== */}
       {walkInModalDoctor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4">
           <div className="safe-modal-panel rounded-3xl border-2 border-slate-300 bg-white p-6 shadow-2xl">
-            <h3 className="text-xl font-black text-slate-950">
-              ပြင်ပလူနာ (Walk-In) / VIP ထည့်သွင်းရန်
-            </h3>
-            <p className="mt-1 text-sm font-bold text-slate-600">
-              {walkInModalDoctor.name_my} အတွက် ကောင်တာမှ တိုက်ရိုက်
-              အလှည့်နံပါတ်နှင့် QR လက်မှတ် ထုတ်ပေးနိုင်ပါသည်။
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-xl font-black text-slate-950">
+                {lang === "my"
+                  ? "Reception မှ လူနာ Booking အသစ်တင်ပေးရန်"
+                  : "Create Patient Booking from Reception"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setWalkInModalDoctor(null)}
+                className="rounded-xl p-1 text-slate-500 hover:bg-slate-100"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            <p className="text-sm font-bold text-slate-600">
+              {lang === "my"
+                ? "Reception ကောင်တာမှ လူနာအသစ် သို့မဟုတ် စာရင်းရှိပြီးသား လူနာအတွက် အလှည့်နံပါတ်နှင့် QR လက်မှတ် တိုက်ရိုက်ထုတ်ပေးနိုင်ပါသည်။"
+                : "Book a queue slot for a walk-in, phone-in, or existing patient with instant QR ticket generation."}
             </p>
 
             {createdTicketId ? (
               <div className="mt-5 space-y-4 rounded-2xl border-2 border-emerald-700 bg-emerald-50 p-5 text-center">
                 <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-700" />
                 <h4 className="text-lg font-black text-emerald-950">
-                  စာရင်းသွင်းပြီး QR လက်မှတ် ထုတ်ပြီးပါပြီ!
+                  {lang === "my"
+                    ? "Booking တင်ပြီး QR လက်မှတ် ထုတ်ပြီးပါပြီ!"
+                    : "Booking Created & QR Ticket Ready!"}
                 </h4>
                 <div className="flex flex-col gap-2">
                   <Link
@@ -1464,43 +1862,169 @@ export default function ReceptionCommandCenterPage() {
                     className="flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white"
                   >
                     <QrCode className="h-4 w-4" />
-                    <span>QR လက်မှတ် ဖွင့်ကြည့်ရန် / ပေးပို့ရန်</span>
+                    <span>
+                      {lang === "my"
+                        ? "QR လက်မှတ် ဖွင့်ကြည့်ရန် / ပေးပို့ရန်"
+                        : "Open / Share QR Ticket"}
+                    </span>
                   </Link>
                   <button
                     type="button"
                     onClick={() => setWalkInModalDoctor(null)}
                     className="min-h-[44px] rounded-xl border border-slate-300 bg-white text-sm font-black"
                   >
-                    ပိတ်မည်
+                    {lang === "my" ? "ပိတ်မည်" : "Close"}
                   </button>
                 </div>
               </div>
             ) : (
               <form onSubmit={handleCreateWalkIn} className="mt-4 space-y-4">
+                {/* Select Doctor */}
                 <div>
                   <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                    လူနာအမည် *
+                    {lang === "my"
+                      ? "ပြသမည့် ဆရာဝန် ရွေးချယ်ရန် *"
+                      : "Select Doctor *"}
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={walkInName}
-                    onChange={(e) => setWalkInName(e.target.value)}
-                    placeholder="ဥပမာ - ဦးကျော်မြင့်"
-                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                  />
+                  <select
+                    value={walkInModalDoctor.id}
+                    onChange={(e) => {
+                      const found = activeDoctors.find(
+                        (d) => d.id === e.target.value
+                      );
+                      if (found) setWalkInModalDoctor(found);
+                    }}
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 bg-white px-3.5 font-bold text-slate-950"
+                  >
+                    {activeDoctors.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.name_my || doc.name} • အခန်း {doc.room_number} (
+                        {formatCurrency(doc.consultation_fee, lang)})
+                      </option>
+                    ))}
+                  </select>
                 </div>
+
+                {/* Toggle New Patient vs Existing Patient */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWalkInPatientMode("new")}
+                    className={`min-h-[44px] rounded-xl border-2 text-xs font-black sm:text-sm ${
+                      walkInPatientMode === "new"
+                        ? "border-blue-700 bg-blue-700 text-white"
+                        : "border-slate-300 bg-white text-slate-800"
+                    }`}
+                  >
+                    {lang === "my" ? "လူနာအသစ် / ပြင်ပလူနာ" : "New Patient"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWalkInPatientMode("existing");
+                      if (!walkInExistingPatientId && patients[0]) {
+                        setWalkInExistingPatientId(patients[0].id);
+                      }
+                    }}
+                    className={`min-h-[44px] rounded-xl border-2 text-xs font-black sm:text-sm ${
+                      walkInPatientMode === "existing"
+                        ? "border-blue-700 bg-blue-700 text-white"
+                        : "border-slate-300 bg-white text-slate-800"
+                    }`}
+                  >
+                    {lang === "my"
+                      ? "စာရင်းရှိပြီးသား လူနာ (Credit သုံးရန်)"
+                      : "Existing Patient"}
+                  </button>
+                </div>
+
+                {walkInPatientMode === "existing" ? (
+                  <div>
+                    <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                      {lang === "my"
+                        ? "စာရင်းရှိပြီးသား လူနာ ရွေးချယ်ပါ *"
+                        : "Select Existing Patient *"}
+                    </label>
+                    <select
+                      value={walkInExistingPatientId}
+                      onChange={(e) =>
+                        setWalkInExistingPatientId(e.target.value)
+                      }
+                      className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 bg-white px-3.5 font-bold text-slate-950"
+                    >
+                      {patients.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.phone}) — Credit:{" "}
+                          {formatCurrency(p.credit_points, lang)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                        {lang === "my" ? "လူနာအမည် *" : "Patient Name *"}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={walkInName}
+                        onChange={(e) => setWalkInName(e.target.value)}
+                        placeholder="ဥပမာ - ဦးကျော်မြင့်"
+                        className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                        {lang === "my" ? "ဖုန်းနံပါတ်" : "Phone Number"}
+                      </label>
+                      <input
+                        type="tel"
+                        value={walkInPhone}
+                        onChange={(e) => setWalkInPhone(e.target.value)}
+                        placeholder="09..."
+                        className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Payment Method Selection */}
                 <div>
                   <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                    ဖုန်းနံပါတ်
+                    {lang === "my"
+                      ? "ငွေပေးချေမှု ပုံစံ"
+                      : "Payment Method"}
                   </label>
-                  <input
-                    type="tel"
-                    value={walkInPhone}
-                    onChange={(e) => setWalkInPhone(e.target.value)}
-                    placeholder="09..."
-                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                  />
+                  <select
+                    value={walkInPayment}
+                    onChange={(e) =>
+                      setWalkInPayment(
+                        e.target.value as
+                          | "cash"
+                          | "credit_points"
+                          | "kpay"
+                          | "wavepay"
+                          | "ayapay"
+                      )
+                    }
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 bg-white px-3.5 font-bold text-slate-950"
+                  >
+                    <option value="cash">
+                      {lang === "my"
+                        ? "ငွေသား (Cash at Counter)"
+                        : "Cash at Reception"}
+                    </option>
+                    <option value="credit_points">
+                      {lang === "my"
+                        ? "Credit Points (လူနာ၏ လက်ကျန်ပွိုင့်မှ ခုနှိမ်မည်)"
+                        : "Credit Points Balance"}
+                    </option>
+                    <option value="kpay">KBZPay (အတည်ပြုပြီး)</option>
+                    <option value="wavepay">WavePay (အတည်ပြုပြီး)</option>
+                    <option value="ayapay">AYA Pay (အတည်ပြုပြီး)</option>
+                  </select>
                 </div>
 
                 <label className="flex cursor-pointer items-center gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
@@ -1511,7 +2035,9 @@ export default function ReceptionCommandCenterPage() {
                     className="h-5 w-5"
                   />
                   <span className="text-sm font-black text-amber-950">
-                    VIP / အရေးပေါ် ဦးစားပေးလူနာ
+                    {lang === "my"
+                      ? "VIP / အရေးပေါ် ဦးစားပေးလူနာ"
+                      : "VIP / Emergency Priority Patient"}
                   </span>
                 </label>
 
@@ -1521,13 +2047,15 @@ export default function ReceptionCommandCenterPage() {
                     onClick={() => setWalkInModalDoctor(null)}
                     className="min-h-[48px] flex-1 rounded-xl border-2 border-slate-300 font-black"
                   >
-                    ပိတ်မည်
+                    {lang === "my" ? "ပိတ်မည်" : "Cancel"}
                   </button>
                   <button
                     type="submit"
                     className="min-h-[48px] flex-1 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-800 font-black text-white"
                   >
-                    နံပါတ်နှင့် QR ထုတ်မည်
+                    {lang === "my"
+                      ? "Booking တင်ပြီး QR ထုတ်မည်"
+                      : "Confirm Booking & QR"}
                   </button>
                 </div>
               </form>

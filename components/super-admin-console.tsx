@@ -136,7 +136,7 @@ export function SuperAdminConsole() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const uploadedUrl = await uploadImageToCloudinaryOrDataUrl(file);
+    const uploadedUrl = await uploadImageToCloudinaryOrDataUrl(file, "branding");
     setLogoUrl(uploadedUrl);
   };
 

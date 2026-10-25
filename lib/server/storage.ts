@@ -11,14 +11,14 @@ export function isCloudinaryConfigured(): boolean {
 }
 
 /**
- * Uploads an image (as a data URI or Buffer) and returns a public URL.
- * Uses Cloudinary when configured (signed upload, no SDK needed),
+ * Uploads an image (as a Buffer) and returns a public URL.
+ * Uses Cloudinary when configured (signed SHA-1 upload, no SDK needed),
  * otherwise falls back to the Supabase Storage "receipts" bucket.
  */
 export async function uploadImage(params: {
   data: Buffer;
   mimeType: string;
-  folder: "receipts" | "tickets";
+  folder: "receipts" | "tickets" | "branding";
   fileName: string;
 }): Promise<string> {
   const { data, mimeType, folder, fileName } = params;
@@ -29,7 +29,7 @@ export async function uploadImage(params: {
     const apiSecret = process.env.CLOUDINARY_API_SECRET!;
     const timestamp = Math.floor(Date.now() / 1000);
     const cloudFolder = `clinic-queue/${folder}`;
-    const publicId = fileName.replace(/\.[a-z0-9]+$/i, "");
+    const publicId = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/\.[a-z0-9]+$/i, "");
     const toSign = `folder=${cloudFolder}&public_id=${publicId}&timestamp=${timestamp}${apiSecret}`;
     const signature = crypto.createHash("sha1").update(toSign).digest("hex");
 
@@ -41,13 +41,21 @@ export async function uploadImage(params: {
     form.append("public_id", publicId);
     form.append("signature", signature);
 
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/image/upload`, {
-      method: "POST",
-      body: form,
-    });
-    const json = (await res.json()) as { secure_url?: string; error?: { message: string } };
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloud}/image/upload`,
+      {
+        method: "POST",
+        body: form,
+      }
+    );
+    const json = (await res.json()) as {
+      secure_url?: string;
+      error?: { message: string };
+    };
     if (!res.ok || !json.secure_url) {
-      throw new Error(`Cloudinary upload failed: ${json.error?.message || res.status}`);
+      throw new Error(
+        `Cloudinary upload failed: ${json.error?.message || res.status}`
+      );
     }
     return json.secure_url;
   }

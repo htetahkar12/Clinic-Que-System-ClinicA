@@ -428,32 +428,24 @@ interface ClinicContextValue {
 const ClinicContext = createContext<ClinicContextValue | null>(null);
 
 export async function uploadImageToCloudinaryOrDataUrl(
-  file: File
+  file: File,
+  folder: "receipts" | "tickets" | "branding" = "receipts"
 ): Promise<string> {
-  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-  const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
-
-  if (
-    cloudName &&
-    uploadPreset &&
-    !cloudName.includes("your-cloudinary") &&
-    !uploadPreset.includes("your-unsigned")
-  ) {
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("upload_preset", uploadPreset);
-      const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-        { method: "POST", body: form }
-      );
-      if (res.ok) {
-        const json = await res.json();
-        if (json.secure_url) return json.secure_url as string;
-      }
-    } catch {
-      // Fall back to Data URL
+  // 1. Primary: Signed Server-Side Cloudinary Upload (/api/upload)
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("folder", folder);
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: form,
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.ok && json.url) return json.url as string;
     }
+  } catch {
+    // Fall back to Data URL if offline
   }
 
   return new Promise((resolve, reject) => {
@@ -473,7 +465,7 @@ async function generateTicketQrDataUrl(
       ? window.location.origin
       : "http://localhost:3000";
   const ticketUrl = `${origin}/ticket/${bookingId}?code=${ticketCode}`;
-  return QRCode.toDataURL(ticketUrl, {
+  const dataUrl = await QRCode.toDataURL(ticketUrl, {
     width: 360,
     margin: 2,
     color: {
@@ -481,6 +473,27 @@ async function generateTicketQrDataUrl(
       light: "#FFFFFF",
     },
   });
+
+  // Upload QR pass image to Cloudinary via signed server route
+  try {
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dataUrl,
+        folder: "tickets",
+        fileName: `qr-${ticketCode}-${bookingId.slice(0, 8)}.png`,
+      }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.ok && json.url) return json.url as string;
+    }
+  } catch {
+    // Keep dataUrl if offline
+  }
+
+  return dataUrl;
 }
 
 export function ClinicProvider({ children }: { children: React.ReactNode }) {

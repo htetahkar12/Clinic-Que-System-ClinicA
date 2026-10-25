@@ -44,3 +44,10 @@ public/worker-*.js.map
 
 # local runtime state
 .clinic-runtime-state.json
+
+# android gradle build intermediates
+android_apps/**/.gradle/
+android_apps/**/build/
+android_apps/**/local.properties
+flutter_apps/**/build/
+flutter_apps/**/.dart_tool/

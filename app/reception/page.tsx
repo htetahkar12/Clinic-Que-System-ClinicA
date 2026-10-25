@@ -825,8 +825,34 @@ export default function ReceptionCommandCenterPage() {
               <Building2 className="h-4 w-4 text-emerald-300" />
               <span>
                 {lang === "my"
-                  ? "Windows Installer (.exe) ဒေါင်းရန်"
-                  : "Download Windows Installer (.exe)"}
+                  ? "Windows Installer (.exe)"
+                  : "Windows Installer (.exe)"}
+              </span>
+            </a>
+
+            <a
+              href="/downloads/Clinic-Reception-Doctor-Android.apk"
+              download="Clinic-Reception-Doctor-Android.apk"
+              className="inline-flex min-h-[46px] items-center gap-1.5 rounded-2xl border border-cyan-400/50 bg-cyan-500/20 px-3.5 py-2 text-xs font-black text-cyan-100 hover:bg-cyan-500/30 sm:text-sm"
+            >
+              <Share2 className="h-4 w-4 text-cyan-300" />
+              <span>
+                {lang === "my"
+                  ? "Reception+Doctor APK"
+                  : "Reception+Doctor APK"}
+              </span>
+            </a>
+
+            <a
+              href="/downloads/Clinic-Patient-Android.apk"
+              download="Clinic-Patient-Android.apk"
+              className="inline-flex min-h-[46px] items-center gap-1.5 rounded-2xl border border-indigo-400/50 bg-indigo-500/20 px-3.5 py-2 text-xs font-black text-indigo-100 hover:bg-indigo-500/30 sm:text-sm"
+            >
+              <Share2 className="h-4 w-4 text-indigo-300" />
+              <span>
+                {lang === "my"
+                  ? "လူနာ Android APK"
+                  : "Patient Android APK"}
               </span>
             </a>
 

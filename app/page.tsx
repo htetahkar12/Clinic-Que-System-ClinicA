@@ -6,7 +6,11 @@ import QRCode from "qrcode";
 import { useClinic } from "@/lib/clinic-store";
 import { Doctor, Booking } from "@/lib/types";
 import { formatCurrency, formatPhoneDisplay } from "@/lib/utils";
-import { enableNotifications } from "@/lib/firebase";
+import {
+  enableNotifications,
+  ensureBackgroundAlertKeepAlive,
+  showLocalNotification,
+} from "@/lib/firebase";
 import {
   Phone,
   ShieldCheck,
@@ -203,6 +207,15 @@ export default function PatientPortalPage() {
     }
   };
 
+  // Automatically activate background audio/SW keep-alive when patient is logged in
+  useEffect(() => {
+    if (!currentPatient || typeof window === "undefined") return;
+    ensureBackgroundAlertKeepAlive();
+    if ("Notification" in window && Notification.permission === "granted") {
+      setNotificationEnabled(true);
+    }
+  }, [currentPatient]);
+
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (otpInput.trim() !== "1234") {
@@ -213,16 +226,35 @@ export default function PatientPortalPage() {
       );
       return;
     }
+    ensureBackgroundAlertKeepAlive();
     await loginWithPhoneOtp(phoneInput, nameInput);
+    enableNotifications()
+      .then((res) => {
+        if (res.permission === "granted" || res.token) {
+          setNotificationEnabled(true);
+        }
+      })
+      .catch(() => {});
     setOnboardingStep("phone");
     setOtpInput("");
   };
 
   const handleEnablePushNotifications = async () => {
+    ensureBackgroundAlertKeepAlive();
     const res = await enableNotifications();
     if (res.permission === "granted" || res.token) {
       setNotificationEnabled(true);
     }
+    // Always trigger the loud "တီ — တီ!" alert + OS push notification so the patient can verify it works
+    showLocalNotification(
+      lang === "my"
+        ? "ဖုန်းသတိပေးချက်နှင့် 'တီ-တီ' အသံစနစ် ဖွင့်ထားပြီးပါပြီ"
+        : "Phone Push & Sound Alerts Active",
+      lang === "my"
+        ? "Reception မှ သတိပေးချက်ပို့လျှင် သို့မဟုတ် သင့်အလှည့်နီးလျှင် ဖုန်း Screen ပိတ်ထားသော်လည်း 'တီ' ဟု အသံမြည်၍ သတိပေးပါမည်။"
+        : "Even when your phone screen is off, you will hear a beep and receive push notifications from Reception.",
+      `clinic-test-alert-${Date.now()}`
+    );
   };
 
   const handleReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -863,11 +895,11 @@ export default function PatientPortalPage() {
               <span>
                 {notificationEnabled
                   ? lang === "my"
-                    ? "အသိပေးချက် ဖွင့်ထားပြီး"
-                    : "Push Alerts Active"
+                    ? "အသိပေးချက် ဖွင့်ထားပြီး ('တီ' အသံစမ်းသပ်ရန် နှိပ်ပါ)"
+                    : "Push & Sound Active (Tap to Test Beep)"
                   : lang === "my"
-                  ? "အလှည့်နီးလျှင် ဖုန်းသတိပေးချက် ဖွင့်မည်"
-                  : "Enable Turn Alerts (FCM)"}
+                  ? "ဖုန်းသတိပေးချက်နှင့် 'တီ' အသံစနစ် ဖွင့်မည် (Screen Off ပါမြည်သည်)"
+                  : "Enable Push & 'Beep' Alerts (Works Screen Off)"}
               </span>
             </button>
           </div>
@@ -1242,11 +1274,11 @@ export default function PatientPortalPage() {
                       ? `ပြေစာပုံ တင်ရန်မလိုပါ။ သင့် Credit Points မှ ${formatCurrency(
                           selectedDoctor.consultation_fee,
                           "my"
-                        )} နှုတ်ယူပြီး ချက်ချင်း အလှည့်နံပါတ် ရရှိပါမည်။`
+                        )} နှုတ်ယူ၍ အလှည့်နံပါတ် ရယူပေးမည်ဖြစ်ပြီး၊ ဆေးခန်း Reception မှ စစ်ဆေးအတည်ပြုပေးပါမည်။`
                       : `No screenshot needed! ${formatCurrency(
                           selectedDoctor.consultation_fee,
                           "en"
-                        )} will be deducted from your Credit Points immediately.`}
+                        )} will be deducted from your Credit Points and Reception will confirm your booking.`}
                   </p>
                 ) : (
                   <p className="text-sm font-bold text-amber-950 sm:text-base">
@@ -1441,18 +1473,87 @@ export default function PatientPortalPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-white/20 bg-white/10 p-3.5 backdrop-blur-sm sm:p-4">
-            <span className="block text-xs font-bold uppercase tracking-wider text-sky-200">
-              {lang === "my"
-                ? "သင့်လက်ကျန် Credit Points"
-                : "Your Credit Points"}
-            </span>
-            <span className="text-xl font-black text-emerald-300 sm:text-2xl">
-              {formatCurrency(currentPatient.credit_points, lang)}
-            </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleEnablePushNotifications}
+              className={`inline-flex min-h-[48px] items-center gap-2 rounded-2xl border-2 px-4 py-2.5 text-xs font-black transition-all sm:text-sm ${
+                notificationEnabled
+                  ? "border-emerald-300 bg-emerald-500/25 text-emerald-100 hover:bg-emerald-500/35"
+                  : "border-amber-300 bg-amber-500 text-slate-950 shadow-md hover:bg-amber-400"
+              }`}
+            >
+              <Bell className="h-4 w-4 shrink-0" />
+              <span>
+                {notificationEnabled
+                  ? lang === "my"
+                    ? "ဖုန်းသတိပေးချက် ဖွင့်ထားပြီး ('တီ' အသံစမ်းရန်)"
+                    : "Push & Beep Active (Tap to Test)"
+                  : lang === "my"
+                  ? "ဖုန်းသတိပေးချက်နှင့် 'တီ' အသံဖွင့်ရန် (Screen Off ပါရသည်)"
+                  : "Enable Push & 'Beep' Alerts"}
+              </span>
+            </button>
+
+            <div className="rounded-2xl border border-white/20 bg-white/10 p-3.5 backdrop-blur-sm sm:p-4">
+              <span className="block text-xs font-bold uppercase tracking-wider text-sky-200">
+                {lang === "my"
+                  ? "သင့်လက်ကျန် Credit Points"
+                  : "Your Credit Points"}
+              </span>
+              <span className="text-xl font-black text-emerald-300 sm:text-2xl">
+                {formatCurrency(currentPatient.credit_points, lang)}
+              </span>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Latest Clinic / Reception Announcements on Home Screen */}
+      {messages.filter((m) => !m.patient_id || m.patient_id === currentPatient.id)
+        .length > 0 && (
+        <div className="mb-6 rounded-3xl border-2 border-blue-200 bg-gradient-to-r from-blue-50 via-white to-indigo-50 p-4 shadow-sm sm:p-5">
+          <div className="mb-2.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <MessageSquareHeart className="h-5 w-5 text-clinic-primary" />
+              <h2 className="text-sm font-black text-slate-950 sm:text-base">
+                {lang === "my"
+                  ? "Reception မှ နောက်ဆုံးပေးပို့သော သတိပေးချက်များ"
+                  : "Latest Announcements from Reception"}
+              </h2>
+            </div>
+            <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-black text-blue-900">
+              LIVE
+            </span>
+          </div>
+          <div className="space-y-2">
+            {messages
+              .filter((m) => !m.patient_id || m.patient_id === currentPatient.id)
+              .slice(0, 2)
+              .map((msg) => (
+                <div
+                  key={msg.id}
+                  className="rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-xs"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-black text-slate-950 sm:text-sm">
+                      {lang === "my" ? msg.title_my : msg.title_en}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-500">
+                      {new Date(msg.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs font-bold text-slate-700 sm:text-sm">
+                    {lang === "my" ? msg.body_my : msg.body_en}
+                  </p>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Doctors List */}
       <div className="grid grid-cols-1 gap-4 sm:gap-5">

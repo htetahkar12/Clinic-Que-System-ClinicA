@@ -21,7 +21,10 @@ import {
   ClinicSettings,
   ReceptionNotification,
 } from "@/lib/types";
-import { showLocalNotification } from "@/lib/firebase";
+import {
+  showLocalNotification,
+  ensureBackgroundAlertKeepAlive,
+} from "@/lib/firebase";
 import {
   CLINIC_CONFIG,
   CLINIC_NAME,
@@ -459,7 +462,7 @@ export const INITIAL_PATIENTS: Patient[] = [
     id: "22222222-2222-4222-8222-222222222201",
     phone: "095123456",
     name: "ဦးဘလှိုင် (U Ba Hlaing)",
-    credit_points: 30000,
+    credit_points: 0,
     fcm_token: null,
     preferred_language: "my",
   },
@@ -467,7 +470,7 @@ export const INITIAL_PATIENTS: Patient[] = [
     id: "22222222-2222-4222-8222-222222222202",
     phone: "0942001122",
     name: "ဒေါ်မြစိန် (Daw Mya Sein)",
-    credit_points: 15000,
+    credit_points: 0,
     fcm_token: null,
     preferred_language: "my",
   },
@@ -483,7 +486,7 @@ export const INITIAL_PATIENTS: Patient[] = [
     id: "22222222-2222-4222-8222-222222222204",
     phone: "0997112233",
     name: "ဒေါ်ခင်စော (Daw Khin Saw)",
-    credit_points: 45000,
+    credit_points: 0,
     fcm_token: null,
     preferred_language: "my",
   },
@@ -979,8 +982,53 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const currentPatient =
     patients.find((p) => p.id === currentPatientId) || null;
 
+  // Real-time Patient Phone Push & "တီ — တီ!" Alert Engine when new messages arrive from Reception
+  const seenMessageIdsRef = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (!currentPatient) return;
+    ensureBackgroundAlertKeepAlive();
+
+    if (seenMessageIdsRef.current === null) {
+      seenMessageIdsRef.current = new Set(messages.map((m) => m.id));
+      return;
+    }
+
+    const activePatientDoctorIds = new Set(
+      bookings
+        .filter(
+          (b) =>
+            b.patient_id === currentPatient.id &&
+            b.status !== "cancelled" &&
+            b.status !== "no_show"
+        )
+        .map((b) => b.doctor_id)
+    );
+
+    for (const msg of messages) {
+      if (seenMessageIdsRef.current.has(msg.id)) continue;
+      seenMessageIdsRef.current.add(msg.id);
+
+      const isForThisPatient = msg.patient_id === currentPatient.id;
+      const isGlobalBroadcast = !msg.doctor_id && !msg.patient_id;
+      const isForPatientDoctor =
+        Boolean(msg.doctor_id) &&
+        activePatientDoctorIds.has(msg.doctor_id!) &&
+        (!msg.patient_id || msg.patient_id === currentPatient.id);
+
+      if (isForThisPatient || isGlobalBroadcast || isForPatientDoctor) {
+        showLocalNotification(
+          lang === "my" ? msg.title_my : msg.title_en,
+          lang === "my" ? msg.body_my : msg.body_en,
+          msg.id
+        );
+      }
+    }
+  }, [messages, currentPatient, bookings, lang]);
+
   const loginWithPhoneOtp = useCallback(
     async (phone: string, name?: string): Promise<Patient> => {
+      ensureBackgroundAlertKeepAlive();
       const normalizedPhone = phone.replace(/\D/g, "");
       let matched = patients.find(
         (p) => p.phone.replace(/\D/g, "") === normalizedPhone
@@ -997,11 +1045,12 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           p.id === matched!.id ? matched! : p
         );
       } else {
+        // Crucial: Zero automatic credit points on new account registration!
         matched = {
           id: crypto.randomUUID(),
           phone: normalizedPhone,
           name: name?.trim() || `လူနာ (${normalizedPhone.slice(-4)})`,
-          credit_points: 30000,
+          credit_points: 0,
           fcm_token: null,
           preferred_language: lang,
           created_at: new Date().toISOString(),
@@ -1085,14 +1134,17 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       let receiptImageUrl: string | null = null;
       if (paymentMethod !== "credit_points") {
-        if (receiptFile) {
-          receiptImageUrl = await uploadImageToCloudinaryOrDataUrl(
-            receiptFile,
-            "receipts"
+        if (!receiptFile) {
+          throw new Error(
+            lang === "my"
+              ? "ကျေးဇူးပြု၍ ငွေလွှဲပြေစာ (Screenshot) ပုံကို အရင် ရွေးချယ်တင်ပေးပါ။"
+              : "Please upload your payment receipt screenshot first."
           );
-        } else {
-          receiptImageUrl = SAMPLE_RECEIPT_SVG;
         }
+        receiptImageUrl = await uploadImageToCloudinaryOrDataUrl(
+          receiptFile,
+          "receipts"
+        );
       }
 
       const doctorBookingsToday = bookings.filter(
@@ -1103,7 +1155,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         doctor.current_queue_number
       );
       const nextQueueNumber = highestBookedQueue + 1;
-      const isInstantPaid = paymentMethod === "credit_points";
       const bookingId = crypto.randomUUID();
       const ticketCode = `AC-${doctor.room_number}-${nextQueueNumber}`;
       const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
@@ -1115,6 +1166,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           : b
       );
 
+      // Crucial: Patient-submitted bookings are ALWAYS "pending" until Reception explicitly confirms!
       const newBooking: Booking = {
         id: bookingId,
         patient_id: currentPatient.id,
@@ -1122,7 +1174,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         booking_date: TODAY_STR,
         queue_number: nextQueueNumber,
         status: "waiting",
-        payment_status: isInstantPaid ? "paid" : "pending",
+        payment_status: "pending",
         ticket_code: ticketCode,
         source: "online",
         is_priority: false,
@@ -1163,13 +1215,14 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         created_at: new Date().toISOString(),
       };
 
-      const nextPatients = isInstantPaid
-        ? patients.map((p) =>
-            p.id === currentPatient.id
-              ? { ...p, credit_points: Math.max(0, p.credit_points - fee) }
-              : p
-          )
-        : patients;
+      const nextPatients =
+        paymentMethod === "credit_points"
+          ? patients.map((p) =>
+              p.id === currentPatient.id
+                ? { ...p, credit_points: Math.max(0, p.credit_points - fee) }
+                : p
+            )
+          : patients;
 
       const nextBookings = [...cleanedOldBookings, newBooking];
       const nextTransactions = [newTransaction, ...transactions];

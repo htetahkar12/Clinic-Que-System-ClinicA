@@ -1,0 +1,84 @@
+name: Build Flutter Apps (Patient APK, Reception+Doctor APK & Windows Installer)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-android-apks:
+    name: Build Patient & Reception+Doctor Android APKs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Build Patient Android APK (flutter_apps/patient_app)
+        working-directory: flutter_apps/patient_app
+        run: |
+          flutter create --platforms=android . --project-name=clinic_patient_app --org=com.auracare
+          flutter pub get
+          flutter build apk --release
+
+      - name: Build Reception + Doctor Android APK (flutter_apps/reception_doctor_app)
+        working-directory: flutter_apps/reception_doctor_app
+        run: |
+          flutter create --platforms=android . --project-name=clinic_reception_doctor_app --org=com.auracare
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload Patient Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clinic-Patient-Android-APK
+          path: flutter_apps/patient_app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload Reception + Doctor Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clinic-Reception-Doctor-Android-APK
+          path: flutter_apps/reception_doctor_app/build/app/outputs/flutter-apk/app-release.apk
+
+  build-windows-installer:
+    name: Build Reception + Doctor Windows Installer (.exe)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter SDK (Windows)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Build Reception + Doctor Flutter Windows Desktop App
+        working-directory: flutter_apps/reception_doctor_app
+        run: |
+          flutter config --enable-windows-desktop
+          flutter create --platforms=windows . --project-name=clinic_reception_doctor_app --org=com.auracare
+          flutter pub get
+          flutter build windows --release
+
+      - name: Package Windows Installer (.exe) with Inno Setup
+        working-directory: flutter_apps/reception_doctor_app/installer
+        run: |
+          iscc reception_doctor_setup.iss
+
+      - name: Upload Reception + Doctor Windows Installer (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clinic-Reception-Doctor-Windows-Installer
+          path: flutter_apps/installers/Clinic-Reception-Doctor-Windows-Setup.exe

@@ -3,6 +3,16 @@ import { uploadImage } from "@/lib/server/storage";
 
 export const dynamic = "force-dynamic";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 const MAX_BYTES = 8 * 1024 * 1024;
 const ALLOWED = [
   "image/jpeg",
@@ -36,7 +46,7 @@ export async function POST(req: NextRequest) {
       if (!match) {
         return NextResponse.json(
           { ok: false, error: "INVALID_DATA_URL" },
-          { status: 400 }
+          { status: 400, headers: CORS_HEADERS }
         );
       }
       const mimeType = match[1];
@@ -48,7 +58,7 @@ export async function POST(req: NextRequest) {
         folder,
         fileName,
       });
-      return NextResponse.json({ ok: true, url });
+      return NextResponse.json({ ok: true, url }, { headers: CORS_HEADERS });
     }
 
     // 2. Multipart FormData with `file`
@@ -63,19 +73,19 @@ export async function POST(req: NextRequest) {
     if (!(file instanceof File)) {
       return NextResponse.json(
         { ok: false, error: "NO_FILE" },
-        { status: 400 }
+        { status: 400, headers: CORS_HEADERS }
       );
     }
     if (file.type && !ALLOWED.includes(file.type)) {
       return NextResponse.json(
         { ok: false, error: "INVALID_FILE_TYPE" },
-        { status: 400 }
+        { status: 400, headers: CORS_HEADERS }
       );
     }
     if (file.size > MAX_BYTES) {
       return NextResponse.json(
         { ok: false, error: "FILE_TOO_LARGE" },
-        { status: 400 }
+        { status: 400, headers: CORS_HEADERS }
       );
     }
 
@@ -86,11 +96,11 @@ export async function POST(req: NextRequest) {
       folder,
       fileName: `${folder}-${Date.now()}.${ext}`,
     });
-    return NextResponse.json({ ok: true, url });
+    return NextResponse.json({ ok: true, url }, { headers: CORS_HEADERS });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "UPLOAD_FAILED" },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }

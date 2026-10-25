@@ -4,6 +4,16 @@ import path from "path";
 
 export const dynamic = "force-dynamic";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 const STATE_FILE_PATH = path.join(process.cwd(), ".clinic-runtime-state.json");
 
 declare global {
@@ -40,31 +50,43 @@ export async function GET(req: NextRequest) {
   const current = readServerState();
 
   if (!current) {
-    return NextResponse.json({ hasState: false, version: 0 });
+    return NextResponse.json(
+      { hasState: false, version: 0 },
+      { headers: CORS_HEADERS }
+    );
   }
 
   const currentVersion = Number(current.version || 0);
   if (since > 0 && currentVersion <= since) {
-    return NextResponse.json({
-      hasState: true,
-      unchanged: true,
-      version: currentVersion,
-    });
+    return NextResponse.json(
+      {
+        hasState: true,
+        unchanged: true,
+        version: currentVersion,
+      },
+      { headers: CORS_HEADERS }
+    );
   }
 
-  return NextResponse.json({
-    hasState: true,
-    unchanged: false,
-    version: currentVersion,
-    state: current,
-  });
+  return NextResponse.json(
+    {
+      hasState: true,
+      unchanged: false,
+      version: currentVersion,
+      state: current,
+    },
+    { headers: CORS_HEADERS }
+  );
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     if (!body || typeof body !== "object") {
-      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid payload" },
+        { status: 400, headers: CORS_HEADERS }
+      );
     }
     const nextVersion = Number(body.version) || Date.now();
     const stateToSave = {
@@ -73,11 +95,14 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date().toISOString(),
     };
     writeServerState(stateToSave);
-    return NextResponse.json({ ok: true, version: nextVersion });
+    return NextResponse.json(
+      { ok: true, version: nextVersion },
+      { headers: CORS_HEADERS }
+    );
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to save state" },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }
@@ -91,5 +116,8 @@ export async function DELETE() {
   } catch {
     // Ignore
   }
-  return NextResponse.json({ ok: true, reset: true });
+  return NextResponse.json(
+    { ok: true, reset: true },
+    { headers: CORS_HEADERS }
+  );
 }

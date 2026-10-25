@@ -817,6 +817,19 @@ export default function ReceptionCommandCenterPage() {
               </span>
             </button>
 
+            <a
+              href="/downloads/Clinic-Reception-Doctor-Windows-Setup.exe"
+              download="Clinic-Reception-Doctor-Windows-Setup.exe"
+              className="inline-flex min-h-[46px] items-center gap-1.5 rounded-2xl border border-emerald-400/50 bg-emerald-500/20 px-3.5 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/30 sm:text-sm"
+            >
+              <Building2 className="h-4 w-4 text-emerald-300" />
+              <span>
+                {lang === "my"
+                  ? "Windows Installer (.exe) ဒေါင်းရန်"
+                  : "Download Windows Installer (.exe)"}
+              </span>
+            </a>
+
             <button
               type="button"
               onClick={() => {

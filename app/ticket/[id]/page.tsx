@@ -38,7 +38,10 @@ export default function TicketPage() {
     const origin =
       typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
     const ticketCode = booking.ticket_code || `Q-${booking.queue_number}`;
-    const url = `${origin}/ticket/${booking.id}?code=${ticketCode}`;
+    const pidQuery = patient?.patient_code
+      ? `&pid=${encodeURIComponent(patient.patient_code)}`
+      : "";
+    const url = `${origin}/ticket/${booking.id}?code=${ticketCode}${pidQuery}`;
     QRCode.toDataURL(url, {
       width: 360,
       margin: 2,
@@ -46,7 +49,7 @@ export default function TicketPage() {
     })
       .then(setQrUrl)
       .catch(() => setQrUrl(null));
-  }, [booking]);
+  }, [booking, patient]);
 
   const handleCopyTicketLink = () => {
     if (typeof window === "undefined") return;
@@ -196,9 +199,24 @@ export default function TicketPage() {
             <span className="mt-2 font-mono text-base font-black text-slate-900">
               {ticketCode}
             </span>
+            {patient?.patient_code && (
+              <span className="mt-1 rounded-lg bg-indigo-950 px-3 py-0.5 font-mono text-xs font-black text-amber-300">
+                ID: {patient.patient_code}
+              </span>
+            )}
           </div>
 
           <div className="mt-6 space-y-2.5 rounded-2xl border-2 border-slate-200 bg-slate-50 p-4 text-left">
+            {patient?.patient_code && (
+              <div className="flex justify-between">
+                <span className="text-sm font-bold text-slate-600">
+                  {lang === "my" ? "လူနာ ID နံပါတ်" : "Patient ID"}
+                </span>
+                <span className="font-mono text-base font-black text-indigo-900">
+                  {patient.patient_code}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-sm font-bold text-slate-600">
                 {lang === "my" ? "လူနာအမည်" : "Patient"}

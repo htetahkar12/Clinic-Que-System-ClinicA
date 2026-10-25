@@ -49,6 +49,9 @@ export function SuperAdminConsole() {
   // Form state synced with settings
   const [clinicNameMy, setClinicNameMy] = useState(settings.clinicNameMy);
   const [clinicName, setClinicName] = useState(settings.clinicName);
+  const [clinicCodePrefix, setClinicCodePrefix] = useState(
+    settings.clinicCodePrefix || "ASC"
+  );
   const [subtitleMy, setSubtitleMy] = useState(settings.subtitleMy);
   const [subtitleEn, setSubtitleEn] = useState(settings.subtitleEn);
   const [logoUrl, setLogoUrl] = useState(settings.logoUrl);
@@ -93,6 +96,7 @@ export function SuperAdminConsole() {
   useEffect(() => {
     setClinicNameMy(settings.clinicNameMy);
     setClinicName(settings.clinicName);
+    setClinicCodePrefix(settings.clinicCodePrefix || "ASC");
     setSubtitleMy(settings.subtitleMy);
     setSubtitleEn(settings.subtitleEn);
     setLogoUrl(settings.logoUrl);
@@ -145,6 +149,11 @@ export function SuperAdminConsole() {
     await updateClinicSettings({
       clinicNameMy: clinicNameMy.trim() || clinicName.trim(),
       clinicName: clinicName.trim() || clinicNameMy.trim(),
+      clinicCodePrefix:
+        clinicCodePrefix
+          .replace(/[^A-Za-z0-9]/g, "")
+          .toUpperCase()
+          .slice(0, 4) || "ASC",
       subtitleMy,
       subtitleEn,
       logoUrl,
@@ -429,6 +438,24 @@ export function SuperAdminConsole() {
                 value={clinicPhone}
                 onChange={(e) => setClinicPhone(e.target.value)}
                 className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                လူနာ ID ရှေ့စာလုံး (၂ မှ ၄ လုံး — ဥပမာ ASC, AC, AYC)
+              </label>
+              <input
+                type="text"
+                maxLength={4}
+                value={clinicCodePrefix}
+                onChange={(e) =>
+                  setClinicCodePrefix(
+                    e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase()
+                  )
+                }
+                placeholder="ASC"
+                className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-mono text-base font-black uppercase text-indigo-950"
               />
             </div>
           </div>

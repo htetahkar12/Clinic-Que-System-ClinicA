@@ -3,7 +3,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { useClinic } from "@/lib/clinic-store";
+import {
+  useClinic,
+  generatePatientIdQrDataUrl,
+} from "@/lib/clinic-store";
 import { Doctor, Booking } from "@/lib/types";
 import { formatCurrency, formatPhoneDisplay } from "@/lib/utils";
 import {
@@ -38,7 +41,7 @@ import {
   PlusCircle,
 } from "lucide-react";
 
-type OnboardingStep = "phone" | "otp";
+type LoginTabMode = "register_or_phone" | "returning_id";
 type PortalView = "doctors" | "checkout" | "tracker";
 
 export default function PatientPortalPage() {
@@ -50,18 +53,24 @@ export default function PatientPortalPage() {
     bookings,
     messages,
     currentPatient,
-    loginWithPhoneOtp,
+    loginOrRegisterPatient,
     createBooking,
     requestPatientBookingCancel,
   } = useClinic();
 
-  // Onboarding State — Blank by default, zero visible password/OTP hints
-  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>("phone");
+  // Zero-SMS-Cost Patient Onboarding & Returning Account Login State
+  const [loginMode, setLoginMode] = useState<LoginTabMode>("register_or_phone");
   const [phoneInput, setPhoneInput] = useState("");
   const [nameInput, setNameInput] = useState("");
-  const [otpInput, setOtpInput] = useState("");
+  const [patientCodeInput, setPatientCodeInput] = useState("");
   const [authError, setAuthError] = useState("");
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Patient ID & QR Card Modal State
+  const [showPatientIdModal, setShowPatientIdModal] = useState(false);
+  const [isNewAccountCreated, setIsNewAccountCreated] = useState(false);
+  const [patientIdQrUrl, setPatientIdQrUrl] = useState<string | null>(null);
+  const [copiedPatientCode, setCopiedPatientCode] = useState(false);
 
   // Portal Navigation State
   const [view, setView] = useState<PortalView>("doctors");
@@ -99,11 +108,16 @@ export default function PatientPortalPage() {
     return patientBookings[patientBookings.length - 1];
   }, [bookings, currentPatient, dismissedBookingId]);
 
-  // Support direct booking URL `?doctor=<id>`
+  // Support direct booking URL `?doctor=<id>` or returning patient QR `?pid=<code>`
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const docParam = params.get("doctor");
+    const pidParam = params.get("pid");
+    if (pidParam && !currentPatient) {
+      setPatientCodeInput(pidParam.trim().toUpperCase());
+      setLoginMode("returning_id");
+    }
     if (docParam && doctors.some((d) => d.id === docParam)) {
       setSelectedDoctorId(docParam);
       if (currentPatient && !activeBooking) {
@@ -111,6 +125,21 @@ export default function PatientPortalPage() {
       }
     }
   }, [doctors, currentPatient, activeBooking]);
+
+  // Generate permanent Patient ID QR Code for currentPatient
+  useEffect(() => {
+    if (!currentPatient?.patient_code) {
+      setPatientIdQrUrl(null);
+      return;
+    }
+    if (currentPatient.qr_card_url) {
+      setPatientIdQrUrl(currentPatient.qr_card_url);
+      return;
+    }
+    generatePatientIdQrDataUrl(currentPatient.patient_code)
+      .then(setPatientIdQrUrl)
+      .catch(() => setPatientIdQrUrl(null));
+  }, [currentPatient]);
 
   // Automatically switch to live tracker if patient has an active booking
   useEffect(() => {
@@ -137,7 +166,7 @@ export default function PatientPortalPage() {
     }
   }, [selectedDoctor, currentPatient]);
 
-  // Generate QR code on client if activeBooking doesn't have qr_image_url cached yet
+  // Generate QR code on client if activeBooking doesn't have qr_image_url cached yet (with embedded Patient ID!)
   useEffect(() => {
     if (!activeBooking) {
       setFallbackQrUrl(null);
@@ -153,7 +182,10 @@ export default function PatientPortalPage() {
         : "http://localhost:3000";
     const ticketCode =
       activeBooking.ticket_code || `Q-${activeBooking.queue_number}`;
-    const url = `${origin}/ticket/${activeBooking.id}?code=${ticketCode}`;
+    const pidQuery = currentPatient?.patient_code
+      ? `&pid=${encodeURIComponent(currentPatient.patient_code)}`
+      : "";
+    const url = `${origin}/ticket/${activeBooking.id}?code=${ticketCode}${pidQuery}`;
     QRCode.toDataURL(url, {
       width: 340,
       margin: 2,
@@ -161,50 +193,16 @@ export default function PatientPortalPage() {
     })
       .then(setFallbackQrUrl)
       .catch(() => setFallbackQrUrl(null));
-  }, [activeBooking]);
+  }, [activeBooking, currentPatient]);
 
   const handlePhoneKeyPress = (digit: string) => {
     setAuthError("");
-    if (onboardingStep === "phone") {
-      if (phoneInput.length < 13) setPhoneInput((prev) => prev + digit);
-    } else {
-      if (otpInput.length < 6) setOtpInput((prev) => prev + digit);
-    }
+    if (phoneInput.length < 13) setPhoneInput((prev) => prev + digit);
   };
 
   const handleBackspace = () => {
     setAuthError("");
-    if (onboardingStep === "phone") {
-      setPhoneInput((prev) => prev.slice(0, -1));
-    } else {
-      setOtpInput((prev) => prev.slice(0, -1));
-    }
-  };
-
-  const handleRequestOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleaned = phoneInput.replace(/\D/g, "");
-    if (cleaned.length < 7) {
-      setAuthError(
-        lang === "my"
-          ? "ကျေးဇူးပြု၍ ဖုန်းနံပါတ် မှန်ကန်စွာ ရိုက်ထည့်ပါ"
-          : "Please enter a valid mobile phone number."
-      );
-      return;
-    }
-    setIsSendingOtp(true);
-    setAuthError("");
-    try {
-      await fetch("/api/otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "send", phone: cleaned }),
-      }).catch(() => {});
-      setOtpInput(""); // Keep OTP blank — user types 1234
-      setOnboardingStep("otp");
-    } finally {
-      setIsSendingOtp(false);
-    }
+    setPhoneInput((prev) => prev.slice(0, -1));
   };
 
   // Automatically activate background audio/SW keep-alive when patient is logged in
@@ -216,27 +214,47 @@ export default function PatientPortalPage() {
     }
   }, [currentPatient]);
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
+  const handlePatientLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otpInput.trim() !== "1234") {
+    setAuthError("");
+    setIsLoggingIn(true);
+    try {
+      ensureBackgroundAlertKeepAlive();
+      const res = await loginOrRegisterPatient({
+        mode: loginMode,
+        phone: phoneInput,
+        name: nameInput,
+        patientCode: patientCodeInput,
+      });
+      enableNotifications()
+        .then((n) => {
+          if (n.permission === "granted" || n.token) {
+            setNotificationEnabled(true);
+          }
+        })
+        .catch(() => {});
+
+      if (res.isNewAccount) {
+        setIsNewAccountCreated(true);
+        setShowPatientIdModal(true);
+      }
+    } catch (err) {
       setAuthError(
-        lang === "my"
-          ? "OTP ကုဒ် မှားယွင်းနေပါသည်။ ပြန်လည်စစ်ဆေးပြီး ရိုက်ထည့်ပါ။"
-          : "Invalid OTP verification code. Please try again."
+        err instanceof Error
+          ? err.message
+          : lang === "my"
+          ? "အကောင့်ဝင်ရောက်ရာတွင် အမှားအယွင်းရှိနေပါသည်။"
+          : "Could not sign in. Please check your details."
       );
-      return;
+    } finally {
+      setIsLoggingIn(false);
     }
-    ensureBackgroundAlertKeepAlive();
-    await loginWithPhoneOtp(phoneInput, nameInput);
-    enableNotifications()
-      .then((res) => {
-        if (res.permission === "granted" || res.token) {
-          setNotificationEnabled(true);
-        }
-      })
-      .catch(() => {});
-    setOnboardingStep("phone");
-    setOtpInput("");
+  };
+
+  const handleCopyPatientCode = (code: string) => {
+    navigator.clipboard?.writeText(code);
+    setCopiedPatientCode(true);
+    setTimeout(() => setCopiedPatientCode(false), 2000);
   };
 
   const handleEnablePushNotifications = async () => {
@@ -329,7 +347,7 @@ export default function PatientPortalPage() {
   };
 
   // ============================================================================
-  // 1. FRICTIONLESS SMS OTP ONBOARDING SCREEN (Responsive Portrait & Landscape)
+  // 1. ZERO-SMS-COST PATIENT ONBOARDING & RETURNING ID LOGIN SCREEN
   // ============================================================================
   if (!currentPatient) {
     return (
@@ -353,8 +371,8 @@ export default function PatientPortalPage() {
               <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-300" />
               <span>
                 {lang === "my"
-                  ? "တိုက်ရိုက် အလှည့်ကြည့်စနစ်"
-                  : "Instant Live Queue"}
+                  ? "SMS ကုန်ကျစရိတ် မရှိသော လူနာ ID စနစ်"
+                  : "Zero-SMS Patient ID System"}
               </span>
             </div>
             <h1 className="text-xl font-black leading-snug sm:text-3xl">
@@ -364,12 +382,18 @@ export default function PatientPortalPage() {
             </h1>
             <p className="mt-2 text-sm font-medium leading-relaxed text-blue-100 sm:text-base">
               {lang === "my"
-                ? "ဆေးခန်းတွင် အကြာကြီး ထိုင်စောင့်ရန် မလိုဘဲ မိမိဖုန်းဖြင့် အလှည့်နံပါတ် ရယူပြီး အချိန်နှင့်တစ်ပြေးညီ စောင့်ကြည့်နိုင်ပါပြီ။"
-                : "Book your doctor queue number from home and track your live turn directly on your phone."}
+                ? "လူနာအမည်နှင့် ဖုန်းနံပါတ် ရိုက်ထည့်ရုံဖြင့် သင့်ကိုယ်ပိုင် လူနာ ID နှင့် QR ကတ်ကို အလိုအလျောက် ထုတ်ပေးပါသည်။ နောက်အခေါက်များတွင် လူနာ ID သို့မဟုတ် ဖုန်းနံပါတ်ဖြင့် အလွယ်တကူ ပြန်ဝင်နိုင်ပါသည်။"
+                : "Sign in with your Name & Phone Number to receive your unique Patient ID & QR Card. Returning patients can sign in anytime using their Patient ID."}
             </p>
+
+            <div className="mt-4 rounded-2xl border border-white/20 bg-white/10 p-3.5 text-xs font-bold text-sky-100 sm:text-sm">
+              {lang === "my"
+                ? "💡 ဖုန်းနံပါတ် ပြောင်းလဲသွားပါကလည်း မိမိ၏ လူနာ ID နှင့် မှတ်ပုံတင်/ယာဉ်မောင်းလိုင်စင်ကို Reception တွင် ပြသ၍ အကောင့်ဟောင်းနှင့် Credit Points များကို ပြန်လည်ရယူနိုင်ပါသည်။"
+                : "💡 Changed your phone number? Show your Patient ID and NRC/Driver's License at Reception to transfer your Credit Points to your new phone."}
+            </div>
           </div>
 
-          {/* Login & Keypad Card */}
+          {/* Login & Returning Patient ID Card */}
           <div
             className={`rounded-3xl border-2 border-slate-200 bg-white p-5 shadow-lg sm:p-7 ${
               viewport.orientation === "landscape" && viewport.width >= 700
@@ -377,125 +401,164 @@ export default function PatientPortalPage() {
                 : ""
             }`}
           >
+            {/* Mode Switcher Tabs */}
+            <div className="mb-5 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("register_or_phone");
+                  setAuthError("");
+                }}
+                className={`min-h-[48px] rounded-xl px-3 py-2 text-xs font-black transition-all sm:text-sm ${
+                  loginMode === "register_or_phone"
+                    ? "bg-gradient-to-r from-blue-700 to-indigo-800 text-white shadow-md"
+                    : "text-slate-700 hover:bg-white/70"
+                }`}
+              >
+                {lang === "my"
+                  ? "၁။ အမည် + ဖုန်းဖြင့် ဝင်မည် (အသစ်/အဟောင်း)"
+                  : "1. Name + Phone Sign In"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode("returning_id");
+                  setAuthError("");
+                }}
+                className={`min-h-[48px] rounded-xl px-3 py-2 text-xs font-black transition-all sm:text-sm ${
+                  loginMode === "returning_id"
+                    ? "bg-gradient-to-r from-emerald-700 to-teal-800 text-white shadow-md"
+                    : "text-slate-700 hover:bg-white/70"
+                }`}
+              >
+                {lang === "my"
+                  ? "၂။ လူနာ ID ဖြင့် အကောင့်ဟောင်းဝင်မည်"
+                  : "2. Returning Patient ID Login"}
+              </button>
+            </div>
+
             <h2 className="text-xl font-black text-slate-950 sm:text-2xl">
-              {onboardingStep === "phone"
+              {loginMode === "register_or_phone"
                 ? lang === "my"
-                  ? "ဖုန်းနံပါတ်ဖြင့် ဝင်ရောက်ပါ"
-                  : "Enter Your Phone Number"
+                  ? "လူနာအမည်နှင့် ဖုန်းနံပါတ် ရိုက်ထည့်ပါ"
+                  : "Enter Patient Name & Phone Number"
                 : lang === "my"
-                ? "SMS အတည်ပြုကုဒ် (OTP) ရိုက်ထည့်ပါ"
-                : "Enter 4-Digit SMS Code"}
+                ? "လူနာ ID ဖြင့် အကောင့်အဟောင်း ပြန်ဝင်ရန်"
+                : "Sign In with Your Patient ID"}
             </h2>
             <p className="mt-1 text-sm font-medium text-slate-700 sm:text-base">
-              {onboardingStep === "phone"
+              {loginMode === "register_or_phone"
                 ? lang === "my"
-                  ? "သင့်ဖုန်းနံပါတ်ကို စာရိုက်၍ဖြစ်စေ၊ အောက်ပါ ခလုတ်များဖြင့်ဖြစ်စေ ထည့်သွင်းပါ။"
-                  : "Enter your mobile number using your keyboard or the buttons below."
+                  ? "အကောင့်အသစ်ဖြစ်ပါက လူနာ ID အလိုအလျောက် ထုတ်ပေးပါမည်။ အကောင့်ရှိပြီးသားဖြစ်ပါက မူလအကောင့်သို့ တိုက်ရိုက်ဝင်ရောက်ပါမည်။"
+                  : "New patients receive an auto-generated Patient ID. Existing phone numbers log right back into your account."
                 : lang === "my"
-                ? `${formatPhoneDisplay(phoneInput)} သို့ ပေးပို့ထားသော ဂဏန်း ၄ လုံး ကုဒ်ကို ရိုက်ထည့်ပါ။`
-                : `Enter the 4-digit verification code sent to ${formatPhoneDisplay(
-                    phoneInput
-                  )}.`}
+                ? "ယခင်ရရှိထားသော လူနာ ID (ဥပမာ - ASC2610250001) နှင့် အမည် သို့မဟုတ် ဖုန်းနံပါတ်ကို ရိုက်ထည့်ပါ။"
+                : "Enter your saved Patient ID (e.g. ASC2610250001) along with your name or phone number."}
             </p>
 
-            <form
-              onSubmit={
-                onboardingStep === "phone" ? handleRequestOtp : handleVerifyOtp
-              }
-              className="mt-4 space-y-4"
-            >
-              {/* High-Contrast Input Field */}
-              <div>
-                <label className="mb-1.5 block text-sm font-extrabold text-slate-900 sm:text-base">
-                  {onboardingStep === "phone"
-                    ? lang === "my"
-                      ? "မိုဘိုင်းဖုန်းနံပါတ်"
-                      : "Mobile Number"
-                    : lang === "my"
-                    ? "ဂဏန်း ၄ လုံး OTP ကုဒ်"
-                    : "4-Digit OTP Code"}
-                </label>
-                <div className="flex min-h-[60px] items-center gap-3 rounded-2xl border-2 border-slate-900 bg-slate-50 px-4 py-2 shadow-inner">
-                  <Phone className="h-6 w-6 shrink-0 text-clinic-primary" />
-                  {onboardingStep === "phone" ? (
-                    <input
-                      type="tel"
-                      inputMode="tel"
-                      value={phoneInput}
-                      onChange={(e) => {
-                        setAuthError("");
-                        setPhoneInput(e.target.value.replace(/[^0-9+]/g, ""));
-                      }}
-                      placeholder={
-                        lang === "my" ? "09..." : "Enter phone number..."
-                      }
-                      className="w-full bg-transparent text-2xl font-black tracking-wider text-slate-950 placeholder:text-slate-400 focus:outline-none sm:text-3xl"
-                    />
-                  ) : (
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={otpInput}
-                      onChange={(e) => {
-                        setAuthError("");
-                        setOtpInput(e.target.value.replace(/\D/g, ""));
-                      }}
-                      placeholder="••••"
-                      className="w-full bg-transparent text-2xl font-black tracking-widest text-slate-950 placeholder:text-slate-400 focus:outline-none sm:text-3xl"
-                    />
-                  )}
-                </div>
-              </div>
-
-              {/* Optional Patient Name Input */}
-              {onboardingStep === "phone" && (
+            <form onSubmit={handlePatientLoginSubmit} className="mt-4 space-y-4">
+              {loginMode === "returning_id" && (
                 <div>
-                  <label className="mb-1 block text-xs font-extrabold text-slate-800 sm:text-sm">
+                  <label className="mb-1.5 block text-sm font-extrabold text-slate-900 sm:text-base">
                     {lang === "my"
-                      ? "လူနာအမည် (အကောင့်အသစ်ဖြစ်ပါက ထည့်သွင်းနိုင်သည်)"
-                      : "Patient Name (Optional for new patients)"}
+                      ? "လူနာ ID နံပါတ် (Patient ID) *"
+                      : "Patient ID Code *"}
                   </label>
-                  <input
-                    type="text"
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    placeholder={
-                      lang === "my"
-                        ? "ဥပမာ - ဦးအောင်မင်း / ဒေါ်စုစု"
-                        : "e.g., U Aung Min / Daw Su Su"
-                    }
-                    className="min-h-[48px] w-full rounded-2xl border-2 border-slate-300 bg-white px-4 text-base font-bold text-slate-950 focus:border-clinic-primary focus:outline-none"
-                  />
+                  <div className="flex min-h-[58px] items-center gap-3 rounded-2xl border-2 border-emerald-700 bg-emerald-50/50 px-4 py-2 shadow-inner">
+                    <QrCode className="h-6 w-6 shrink-0 text-emerald-700" />
+                    <input
+                      type="text"
+                      value={patientCodeInput}
+                      onChange={(e) => {
+                        setAuthError("");
+                        setPatientCodeInput(e.target.value.toUpperCase());
+                      }}
+                      placeholder="ဥပမာ - ASC2610250001"
+                      className="w-full bg-transparent font-mono text-xl font-black uppercase tracking-wider text-slate-950 placeholder:text-slate-400 focus:outline-none sm:text-2xl"
+                    />
+                  </div>
                 </div>
               )}
 
-              {/* Elderly-Friendly Tactile Dial Pad */}
+              {/* Patient Name Input */}
+              <div>
+                <label className="mb-1.5 block text-sm font-extrabold text-slate-900 sm:text-base">
+                  {loginMode === "register_or_phone"
+                    ? lang === "my"
+                      ? "လူနာအမည် အပြည့်အစုံ *"
+                      : "Patient Full Name *"
+                    : lang === "my"
+                    ? "လူနာအမည် (အတည်ပြုရန်)"
+                    : "Patient Name (For Verification)"}
+                </label>
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => {
+                    setAuthError("");
+                    setNameInput(e.target.value);
+                  }}
+                  placeholder={
+                    lang === "my"
+                      ? "ဥပမာ - ဦးဘလှိုင် / ဒေါ်မြစိန်"
+                      : "e.g., U Ba Hlaing / Daw Mya Sein"
+                  }
+                  className="min-h-[54px] w-full rounded-2xl border-2 border-slate-900 bg-slate-50 px-4 text-lg font-black text-slate-950 placeholder:text-slate-400 focus:border-clinic-primary focus:outline-none"
+                />
+              </div>
+
+              {/* Mobile Phone Number Field */}
+              <div>
+                <label className="mb-1.5 block text-sm font-extrabold text-slate-900 sm:text-base">
+                  {loginMode === "register_or_phone"
+                    ? lang === "my"
+                      ? "မိုဘိုင်းဖုန်းနံပါတ် *"
+                      : "Mobile Phone Number *"
+                    : lang === "my"
+                    ? "ဖုန်းနံပါတ် (မှတ်မိပါက ထည့်သွင်းရန်)"
+                    : "Mobile Phone Number (Optional if Name matches)"}
+                </label>
+                <div className="flex min-h-[60px] items-center gap-3 rounded-2xl border-2 border-slate-900 bg-slate-50 px-4 py-2 shadow-inner">
+                  <Phone className="h-6 w-6 shrink-0 text-clinic-primary" />
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    value={phoneInput}
+                    onChange={(e) => {
+                      setAuthError("");
+                      setPhoneInput(e.target.value.replace(/[^0-9+]/g, ""));
+                    }}
+                    placeholder={
+                      lang === "my" ? "09..." : "Enter phone number..."
+                    }
+                    className="w-full bg-transparent text-2xl font-black tracking-wider text-slate-950 placeholder:text-slate-400 focus:outline-none sm:text-3xl"
+                  />
+                </div>
+              </div>
+
+              {/* Elderly-Friendly Tactile Dial Pad for Phone Number */}
               <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
                 {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
                   <button
                     key={digit}
                     type="button"
                     onClick={() => handlePhoneKeyPress(digit)}
-                    className="dialpad-btn flex min-h-[54px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-gradient-to-b from-white to-slate-100 text-2xl font-black text-slate-950 shadow-sm active:scale-95 active:bg-slate-200 sm:min-h-[60px]"
+                    className="dialpad-btn flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-gradient-to-b from-white to-slate-100 text-2xl font-black text-slate-950 shadow-sm active:scale-95 active:bg-slate-200 sm:min-h-[56px]"
                   >
                     {digit}
                   </button>
                 ))}
                 <button
                   type="button"
-                  onClick={() => {
-                    if (onboardingStep === "phone") setPhoneInput("");
-                    else setOtpInput("");
-                  }}
-                  className="dialpad-btn flex min-h-[54px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-slate-100 text-xs font-extrabold text-slate-800 active:scale-95 sm:min-h-[60px] sm:text-sm"
+                  onClick={() => setPhoneInput("")}
+                  className="dialpad-btn flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-slate-100 text-xs font-extrabold text-slate-800 active:scale-95 sm:min-h-[56px] sm:text-sm"
                 >
-                  {lang === "my" ? "အကုန်ဖျက်" : "CLEAR"}
+                  {lang === "my" ? "ဖုန်းဖျက်" : "CLEAR"}
                 </button>
                 <button
                   type="button"
                   onClick={() => handlePhoneKeyPress("0")}
-                  className="dialpad-btn flex min-h-[54px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-gradient-to-b from-white to-slate-100 text-2xl font-black text-slate-950 shadow-sm active:scale-95 active:bg-slate-200 sm:min-h-[60px]"
+                  className="dialpad-btn flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-gradient-to-b from-white to-slate-100 text-2xl font-black text-slate-950 shadow-sm active:scale-95 active:bg-slate-200 sm:min-h-[56px]"
                 >
                   0
                 </button>
@@ -503,7 +566,7 @@ export default function PatientPortalPage() {
                   type="button"
                   onClick={handleBackspace}
                   aria-label="Delete last digit"
-                  className="dialpad-btn flex min-h-[54px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-slate-100 text-slate-900 active:scale-95 sm:min-h-[60px]"
+                  className="dialpad-btn flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-slate-100 text-slate-900 active:scale-95 sm:min-h-[56px]"
                 >
                   <Delete className="h-6 w-6" />
                 </button>
@@ -518,42 +581,169 @@ export default function PatientPortalPage() {
               {/* Primary CTA */}
               <button
                 type="submit"
-                disabled={isSendingOtp}
+                disabled={isLoggingIn}
                 className="flex min-h-[58px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-6 py-3.5 text-lg font-black text-white shadow-lg transition-all hover:opacity-95 active:scale-[0.99] sm:min-h-[64px] sm:text-xl"
               >
                 <span>
-                  {onboardingStep === "phone"
+                  {isLoggingIn
                     ? lang === "my"
-                      ? "OTP ကုဒ် ရယူမည်"
-                      : "Send SMS OTP Code"
+                      ? "ချိတ်ဆက်နေပါသည်..."
+                      : "Signing In..."
+                    : loginMode === "register_or_phone"
+                    ? lang === "my"
+                      ? "အကောင့်ဝင်မည် / လူနာ ID ရယူမည်"
+                      : "Sign In / Get Patient ID"
                     : lang === "my"
-                    ? "အတည်ပြုပြီး ဆေးခန်းစနစ်သို့ ဝင်မည်"
-                    : "Verify & Sign In Now"}
+                    ? "လူနာ ID ဖြင့် အကောင့်အဟောင်း ဝင်မည်"
+                    : "Sign In with Patient ID"}
                 </span>
                 <ArrowRight className="h-6 w-6 shrink-0" />
               </button>
-
-              {onboardingStep === "otp" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOnboardingStep("phone");
-                    setOtpInput("");
-                    setAuthError("");
-                  }}
-                  className="flex min-h-[48px] w-full items-center justify-center rounded-2xl border-2 border-slate-300 bg-white text-sm font-extrabold text-slate-800 hover:bg-slate-100 sm:text-base"
-                >
-                  {lang === "my"
-                    ? "← ဖုန်းနံပါတ် ပြန်ပြင်မည်"
-                    : "← Change Phone Number"}
-                </button>
-              )}
             </form>
           </div>
         </div>
       </div>
     );
   }
+
+  const patientIdCardModalElement = showPatientIdModal ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-6">
+      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-3xl border-2 border-slate-300 bg-white shadow-2xl">
+        {/* Royal Header */}
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 p-5 text-white sm:p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-black text-emerald-300">
+                <QrCode className="h-3.5 w-3.5" />
+                {isNewAccountCreated
+                  ? lang === "my"
+                    ? "လူနာအကောင့်သစ် ဖွင့်လှစ်ပြီးပါပြီ"
+                    : "New Patient Account Created"
+                  : lang === "my"
+                  ? "တရားဝင် လူနာသက်သေခံ ID နှင့် QR ကတ်"
+                  : "Official Digital Patient ID & QR Card"}
+              </span>
+              <h2 className="mt-2 text-xl font-black sm:text-2xl">
+                {lang === "my"
+                  ? settings.clinicNameMy
+                  : settings.clinicName}
+              </h2>
+              <p className="text-xs font-bold text-blue-100 sm:text-sm">
+                {currentPatient.name} • {formatPhoneDisplay(currentPatient.phone)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowPatientIdModal(false);
+                setIsNewAccountCreated(false);
+              }}
+              className="rounded-xl bg-white/15 px-3 py-1.5 text-xs font-black text-white hover:bg-white/25"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4 p-5 sm:p-6">
+          {/* Critical Warning to Write Down or Screenshot */}
+          <div className="rounded-2xl border-2 border-amber-600 bg-amber-50 p-4 text-amber-950">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-amber-700" />
+              <div className="text-xs font-extrabold leading-relaxed sm:text-sm">
+                {lang === "my"
+                  ? "အရေးကြီးပါသည် — သင့်လူနာ ID နံပါတ်ကို စာရွက်တွင် ချရေးထားပါ သို့မဟုတ် ဤစာမျက်နှာကို Screenshot ရိုက်၍ သိမ်းဆည်းထားပါ။ နောင်တွင် ဖုန်းနံပါတ်ပြောင်းလဲပါက လက်ကျန် Credit Points များ ပြန်လည်ရယူရန် ဤ ID နှင့် မှတ်ပုံတင်/ယာဉ်မောင်းလိုင်စင်ကို Reception တွင် ပြသရပါမည်။"
+                  : "IMPORTANT: Please write down your Patient ID or take a Screenshot of this card. If you ever change your phone number, you will need this Patient ID and your NRC/Driver's License at Reception to recover your Credit Points."}
+              </div>
+            </div>
+          </div>
+
+          {/* Massive Patient ID Badge + Copy */}
+          <div className="rounded-2xl border-2 border-indigo-700 bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-4 text-center shadow-sm">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-900">
+              {lang === "my"
+                ? "သင့်ကိုယ်ပိုင် လူနာ ID နံပါတ် (Patient ID)"
+                : "Your Unique Patient ID"}
+            </span>
+            <p className="my-1.5 font-mono text-2xl font-black tracking-wider text-slate-950 sm:text-3xl">
+              {currentPatient.patient_code}
+            </p>
+            <button
+              type="button"
+              onClick={() => handleCopyPatientCode(currentPatient.patient_code)}
+              className="mt-1 inline-flex min-h-[42px] items-center gap-2 rounded-xl border-2 border-indigo-700 bg-white px-4 py-1.5 text-xs font-black text-indigo-900 hover:bg-indigo-50 sm:text-sm"
+            >
+              {copiedPatientCode ? (
+                <>
+                  <Check className="h-4 w-4 text-emerald-700" />
+                  <span>{lang === "my" ? "ID ကူးယူပြီးပါပြီ" : "ID Copied!"}</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  <span>{lang === "my" ? "လူနာ ID ကူးယူမည်" : "Copy Patient ID"}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Permanent Patient QR Code */}
+          <div className="flex flex-col items-center rounded-2xl border-2 border-slate-200 bg-slate-50 p-4">
+            {patientIdQrUrl ? (
+              <img
+                src={patientIdQrUrl}
+                alt={`Patient QR ${currentPatient.patient_code}`}
+                className="h-44 w-44 rounded-xl border border-slate-200 bg-white p-2 object-contain"
+              />
+            ) : (
+              <div className="flex h-44 w-44 items-center justify-center rounded-xl bg-white">
+                <QrCode className="h-16 w-16 text-slate-400" />
+              </div>
+            )}
+            <span className="mt-2 font-mono text-sm font-black text-slate-900">
+              ID: {currentPatient.patient_code}
+            </span>
+            <p className="mt-1 text-center text-xs font-bold text-slate-600">
+              {lang === "my"
+                ? "Reception ကောင်တာတွင် ဤ QR ကို Scan ဖတ်၍ သင့်အကောင့်နှင့် ပွိုင့်များကို ချက်ချင်း ရှာဖွေနိုင်ပါသည်။"
+                : "Reception can scan this QR code to instantly find your profile and Credit Points."}
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-wrap gap-3">
+            {patientIdQrUrl && (
+              <a
+                href={patientIdQrUrl}
+                download={`Patient-ID-${currentPatient.patient_code}.png`}
+                className="flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-blue-700 bg-blue-50 px-4 py-2.5 text-sm font-black text-blue-950 hover:bg-blue-100"
+              >
+                <Download className="h-4 w-4" />
+                <span>
+                  {lang === "my" ? "QR ကတ်ပုံ သိမ်းမည်" : "Download QR Card"}
+                </span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setShowPatientIdModal(false);
+                setIsNewAccountCreated(false);
+              }}
+              className="flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-700 to-indigo-800 px-4 py-2.5 text-sm font-black text-white shadow-md hover:opacity-95"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              <span>
+                {lang === "my"
+                  ? "မှတ်သားပြီးပါပြီ (ဆက်လက်လုပ်ဆောင်မည်)"
+                  : "Got It, Continue"}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   // ============================================================================
   // 2. LIVE QUEUE TRACKER VIEW (REAL-TIME 3 -> 4 -> 5 SYNC)
@@ -591,18 +781,34 @@ export default function PatientPortalPage() {
 
     return (
       <div className="mx-auto w-full max-w-3xl px-3 py-5 sm:px-6 sm:py-8">
+        {patientIdCardModalElement}
         {/* Top Patient Welcome & Status Bar */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm">
           <div className="min-w-0">
-            <p className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
-              {lang === "my" ? "လူနာအမည်" : "Patient"}
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                {lang === "my" ? "လူနာအမည်" : "Patient"}
+              </p>
+              <span className="rounded-lg bg-indigo-950 px-2.5 py-0.5 font-mono text-xs font-black text-amber-300">
+                ID: {currentPatient.patient_code}
+              </span>
+            </div>
             <h1 className="truncate text-lg font-black text-slate-950 sm:text-xl">
               {currentPatient.name}
             </h1>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPatientIdModal(true)}
+              className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border-2 border-indigo-700 bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-950 hover:bg-indigo-100 sm:text-sm"
+            >
+              <QrCode className="h-4 w-4 text-indigo-700" />
+              <span>
+                {lang === "my" ? "လူနာ ID နှင့် QR ကတ်" : "Patient ID & QR"}
+              </span>
+            </button>
             {activeBooking.is_priority && (
               <span className="inline-flex items-center gap-1 rounded-xl bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-950">
                 <Crown className="h-4 w-4 text-amber-600" />
@@ -971,6 +1177,9 @@ export default function PatientPortalPage() {
               )}
               <span className="mt-1.5 font-mono text-sm font-black text-slate-900">
                 {ticketCode}
+              </span>
+              <span className="mt-0.5 rounded-md bg-indigo-950 px-2 py-0.5 font-mono text-[11px] font-black text-amber-300">
+                ID: {currentPatient.patient_code}
               </span>
             </div>
 
@@ -1409,6 +1618,7 @@ export default function PatientPortalPage() {
   // ============================================================================
   return (
     <div className="mx-auto w-full max-w-4xl px-3 py-5 sm:px-6 sm:py-8">
+      {patientIdCardModalElement}
       {/* Cancel / Refund Notification Banner */}
       {cancelNotice && (
         <div className="mb-6 flex items-start justify-between gap-4 rounded-3xl border-2 border-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 p-5 text-emerald-950 shadow-md">
@@ -1453,12 +1663,17 @@ export default function PatientPortalPage() {
       <div className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 p-5 text-white shadow-xl sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-sky-200">
-              <UserCheck className="h-4 w-4 text-emerald-300" />
-              <span className="truncate">
-                {lang === "my"
-                  ? `မင်္ဂလာပါ • ${currentPatient.name}`
-                  : `Welcome, ${currentPatient.name}`}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-sky-200">
+                <UserCheck className="h-4 w-4 text-emerald-300" />
+                <span className="truncate">
+                  {lang === "my"
+                    ? `မင်္ဂလာပါ • ${currentPatient.name}`
+                    : `Welcome, ${currentPatient.name}`}
+                </span>
+              </div>
+              <span className="rounded-full bg-amber-400 px-3 py-1 font-mono text-xs font-black text-slate-950 shadow-xs">
+                ID: {currentPatient.patient_code}
               </span>
             </div>
             <h1 className="mt-2 text-xl font-black sm:text-3xl">
@@ -1474,6 +1689,18 @@ export default function PatientPortalPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowPatientIdModal(true)}
+              className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl border-2 border-white/40 bg-white/15 px-4 py-2.5 text-xs font-black text-white backdrop-blur-sm hover:bg-white/25 sm:text-sm"
+            >
+              <QrCode className="h-4 w-4 shrink-0 text-amber-300" />
+              <span>
+                {lang === "my"
+                  ? "လူနာ ID / QR ကတ် (Screenshot ရိုက်ရန်)"
+                  : "Patient ID & QR Card"}
+              </span>
+            </button>
             <button
               type="button"
               onClick={handleEnablePushNotifications}

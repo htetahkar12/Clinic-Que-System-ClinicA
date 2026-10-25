@@ -76,9 +76,119 @@ const SAMPLE_RECEIPT_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
 
 const TODAY_STR = clinicToday();
 
+/**
+ * Extracts a 2 to 4 letter uppercase prefix from the clinic's name or custom prefix.
+ * Example: "Ayeyarwady Specialist Clinic" -> "ASC", "AuraCare Poly Clinic" -> "APC"
+ */
+export function getClinicCodePrefix(
+  clinicName: string,
+  customPrefix?: string
+): string {
+  const cleanedCustom = (customPrefix || "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
+  if (cleanedCustom.length >= 2 && cleanedCustom.length <= 4) {
+    return cleanedCustom;
+  }
+
+  const words = (clinicName || "")
+    .replace(/[^A-Za-z\s]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length >= 2) {
+    const initials = words
+      .map((w) => w[0].toUpperCase())
+      .join("")
+      .slice(0, 4);
+    if (initials.length >= 2) return initials;
+  }
+
+  const lettersOnly = (clinicName || "")
+    .replace(/[^A-Za-z]/g, "")
+    .toUpperCase();
+  if (lettersOnly.length >= 2) {
+    return lettersOnly.slice(0, 3);
+  }
+  return "ASC";
+}
+
+export function getYYMMDD(dateStr: string = TODAY_STR): string {
+  const parts = dateStr.split("-");
+  if (parts.length === 3) {
+    const yy = parts[0].slice(-2);
+    const mm = parts[1].padStart(2, "0");
+    const dd = parts[2].padStart(2, "0");
+    return `${yy}${mm}${dd}`;
+  }
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yy}${mm}${dd}`;
+}
+
+/**
+ * Generates Patient ID in exact format: [ClinicPrefix(2-4 chars)][YYMMDD][TTTT]
+ * where TTTT is the 4-digit daily account creation counter for that date (0001, 0002, ...).
+ */
+export function generatePatientCode(
+  settings: ClinicSettings,
+  existingPatients: Patient[],
+  dateStr: string = TODAY_STR
+): string {
+  const prefix = getClinicCodePrefix(
+    settings.clinicName,
+    settings.clinicCodePrefix
+  );
+  const yymmdd = getYYMMDD(dateStr);
+
+  let maxDailyCounter = 0;
+  for (const p of existingPatients) {
+    const code = (p.patient_code || "").toUpperCase();
+    const match = code.match(/^[A-Z0-9]{2,4}(\d{6})(\d{4})$/);
+    if (match && match[1] === yymmdd) {
+      const seq = parseInt(match[2], 10);
+      if (!isNaN(seq) && seq > maxDailyCounter) {
+        maxDailyCounter = seq;
+      }
+    }
+  }
+
+  const nextCounter = String(maxDailyCounter + 1).padStart(4, "0");
+  return `${prefix}${yymmdd}${nextCounter}`;
+}
+
+/**
+ * Extracts a Patient ID, Ticket Code, or Phone query from raw QR scan text or URL.
+ */
+export function extractPatientQueryFromQrText(raw: string): string {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "";
+  try {
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      const url = new URL(trimmed);
+      const pid = url.searchParams.get("pid");
+      if (pid) return pid.trim().toUpperCase();
+      const code = url.searchParams.get("code");
+      if (code) return code.trim().toUpperCase();
+    }
+  } catch {
+    // Not a URL, continue
+  }
+  // Check if it contains pid= or PATIENT:
+  const pidMatch = trimmed.match(/(?:pid=|PATIENT:)([A-Za-z0-9-]+)/i);
+  if (pidMatch && pidMatch[1]) {
+    return pidMatch[1].toUpperCase();
+  }
+  return trimmed;
+}
+
 export const INITIAL_SETTINGS: ClinicSettings = {
   clinicName: CLINIC_NAME,
   clinicNameMy: CLINIC_NAME_MY,
+  clinicCodePrefix: getClinicCodePrefix(CLINIC_NAME),
   subtitleEn: "Pre-Paid Poly Clinic Queue & Appointment System",
   subtitleMy: "ကြိုတင်ဘိုကင်နှင့် တိုက်ရိုက် အလှည့်ကြည့် အထူးကုဆေးခန်းစနစ်",
   logoUrl: LOGO_URL,
@@ -457,9 +567,13 @@ export const INITIAL_DOCTORS: Doctor[] = [
   },
 ];
 
+const INITIAL_PREFIX = getClinicCodePrefix(CLINIC_NAME);
+const INITIAL_YYMMDD = getYYMMDD(TODAY_STR);
+
 export const INITIAL_PATIENTS: Patient[] = [
   {
     id: "22222222-2222-4222-8222-222222222201",
+    patient_code: `${INITIAL_PREFIX}${INITIAL_YYMMDD}0001`,
     phone: "095123456",
     name: "ဦးဘလှိုင် (U Ba Hlaing)",
     credit_points: 0,
@@ -468,6 +582,7 @@ export const INITIAL_PATIENTS: Patient[] = [
   },
   {
     id: "22222222-2222-4222-8222-222222222202",
+    patient_code: `${INITIAL_PREFIX}${INITIAL_YYMMDD}0002`,
     phone: "0942001122",
     name: "ဒေါ်မြစိန် (Daw Mya Sein)",
     credit_points: 0,
@@ -476,6 +591,7 @@ export const INITIAL_PATIENTS: Patient[] = [
   },
   {
     id: "22222222-2222-4222-8222-222222222203",
+    patient_code: `${INITIAL_PREFIX}${INITIAL_YYMMDD}0003`,
     phone: "0979887766",
     name: "ဦးတင်ဦး (U Tin Oo)",
     credit_points: 0,
@@ -484,6 +600,7 @@ export const INITIAL_PATIENTS: Patient[] = [
   },
   {
     id: "22222222-2222-4222-8222-222222222204",
+    patient_code: `${INITIAL_PREFIX}${INITIAL_YYMMDD}0004`,
     phone: "0997112233",
     name: "ဒေါ်ခင်စော (Daw Khin Saw)",
     credit_points: 0,
@@ -632,6 +749,18 @@ interface ClinicContextValue {
   isLoading: boolean;
   isRealtimeConnected: boolean;
   loginWithPhoneOtp: (phone: string, name?: string) => Promise<Patient>;
+  loginOrRegisterPatient: (params: {
+    mode: "register_or_phone" | "returning_id";
+    phone?: string;
+    name?: string;
+    patientCode?: string;
+  }) => Promise<{ patient: Patient; isNewAccount: boolean }>;
+  updatePatientPhoneByReception: (params: {
+    patientId: string;
+    newPhone: string;
+    nrcOrLicense: string;
+    newName?: string;
+  }) => Promise<Patient>;
   logoutPatient: () => void;
   createBooking: (params: {
     doctorId: string;
@@ -742,13 +871,15 @@ export async function uploadImageToCloudinaryOrDataUrl(
 
 async function generateTicketQrDataUrl(
   bookingId: string,
-  ticketCode: string
+  ticketCode: string,
+  patientCode?: string
 ): Promise<string> {
   const origin =
     typeof window !== "undefined"
       ? window.location.origin
       : "http://localhost:3000";
-  const ticketUrl = `${origin}/ticket/${bookingId}?code=${ticketCode}`;
+  const pidParam = patientCode ? `&pid=${encodeURIComponent(patientCode)}` : "";
+  const ticketUrl = `${origin}/ticket/${bookingId}?code=${ticketCode}${pidParam}`;
   const dataUrl = await QRCode.toDataURL(ticketUrl, {
     width: 360,
     margin: 2,
@@ -780,6 +911,24 @@ async function generateTicketQrDataUrl(
   return dataUrl;
 }
 
+export async function generatePatientIdQrDataUrl(
+  patientCode: string
+): Promise<string> {
+  const origin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:3000";
+  const qrPayload = `${origin}/?pid=${encodeURIComponent(patientCode)}`;
+  return QRCode.toDataURL(qrPayload, {
+    width: 340,
+    margin: 2,
+    color: {
+      dark: "#0F172A",
+      light: "#FFFFFF",
+    },
+  });
+}
+
 export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const viewport = useDeviceViewport();
   const [lang, setLangState] = useState<Lang>(DEFAULT_LANGUAGE);
@@ -807,11 +956,28 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     versionRef.current = incomingVersion || Date.now();
+    const resolvedSettings = incoming.settings
+      ? { ...INITIAL_SETTINGS, ...incoming.settings }
+      : INITIAL_SETTINGS;
     if (incoming.settings) {
       setSettings((prev) => ({ ...prev, ...incoming.settings }));
     }
     if (Array.isArray(incoming.doctors)) setDoctors(incoming.doctors);
-    if (Array.isArray(incoming.patients)) setPatients(incoming.patients);
+    if (Array.isArray(incoming.patients)) {
+      const normalizedPatients: Patient[] = [];
+      for (const p of incoming.patients) {
+        if (p.patient_code) {
+          normalizedPatients.push(p);
+        } else {
+          const code = generatePatientCode(
+            resolvedSettings,
+            normalizedPatients
+          );
+          normalizedPatients.push({ ...p, patient_code: code });
+        }
+      }
+      setPatients(normalizedPatients);
+    }
     if (Array.isArray(incoming.bookings)) setBookings(incoming.bookings);
     if (Array.isArray(incoming.transactions))
       setTransactions(incoming.transactions);
@@ -1026,33 +1192,114 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     }
   }, [messages, currentPatient, bookings, lang]);
 
-  const loginWithPhoneOtp = useCallback(
-    async (phone: string, name?: string): Promise<Patient> => {
+  const loginOrRegisterPatient = useCallback(
+    async ({
+      mode,
+      phone,
+      name,
+      patientCode,
+    }: {
+      mode: "register_or_phone" | "returning_id";
+      phone?: string;
+      name?: string;
+      patientCode?: string;
+    }): Promise<{ patient: Patient; isNewAccount: boolean }> => {
       ensureBackgroundAlertKeepAlive();
-      const normalizedPhone = phone.replace(/\D/g, "");
-      let matched = patients.find(
-        (p) => p.phone.replace(/\D/g, "") === normalizedPhone
-      );
+      const cleanedCode = extractPatientQueryFromQrText(
+        patientCode || ""
+      ).toUpperCase();
+      const normalizedPhone = (phone || "").replace(/\D/g, "");
+      const trimmedName = (name || "").trim();
+
+      let matched: Patient | undefined;
+      let isNewAccount = false;
+
+      if (mode === "returning_id" || cleanedCode) {
+        if (!cleanedCode) {
+          throw new Error(
+            lang === "my"
+              ? "ကျေးဇူးပြု၍ လူနာ ID နံပါတ် ရိုက်ထည့်ပေးပါ။"
+              : "Please enter your Patient ID."
+          );
+        }
+        matched = patients.find(
+          (p) => (p.patient_code || "").toUpperCase() === cleanedCode
+        );
+        if (!matched) {
+          throw new Error(
+            lang === "my"
+              ? `လူနာ ID (${cleanedCode}) ဖြင့် အကောင့်မတွေ့ရှိပါ။ ID နံပါတ် ပြန်စစ်ဆေးပါ သို့မဟုတ် Reception တွင် မေးမြန်းပါ။`
+              : `No patient account found with ID (${cleanedCode}). Please check your ID or ask Reception.`
+          );
+        }
+        // Optional verification: if user also entered phone or name, check that at least one matches or allow ID login
+        if (normalizedPhone && matched.phone.replace(/\D/g, "") !== normalizedPhone) {
+          // If phone differs, check if name matches (e.g. they remember ID + name)
+          const nameMatches =
+            trimmedName &&
+            matched.name.toLowerCase().includes(trimmedName.toLowerCase());
+          if (!nameMatches) {
+            throw new Error(
+              lang === "my"
+                ? `ဤလူနာ ID (${cleanedCode}) နှင့် ချိတ်ဆက်ထားသော ဖုန်းနံပါတ် မတူညီပါ။ ဖုန်းနံပါတ် ပြောင်းထားပါက Reception ကောင်တာတွင် မှတ်ပုံတင်/လိုင်စင်ပြ၍ ဖုန်းနံပါတ်အသစ် ပြောင်းလဲနိုင်ပါသည်။`
+                : `Phone number does not match Patient ID (${cleanedCode}). If you changed your phone number, please ask Reception to update it with your NRC/License.`
+            );
+          }
+        }
+      } else {
+        if (normalizedPhone.length < 7) {
+          throw new Error(
+            lang === "my"
+              ? "ကျေးဇူးပြု၍ ဖုန်းနံပါတ် မှန်ကန်စွာ ရိုက်ထည့်ပါ။"
+              : "Please enter a valid mobile phone number."
+          );
+        }
+        if (!trimmedName) {
+          throw new Error(
+            lang === "my"
+              ? "ကျေးဇူးပြု၍ လူနာအမည် ရိုက်ထည့်ပေးပါ။"
+              : "Please enter the patient's full name."
+          );
+        }
+
+        matched = patients.find(
+          (p) => p.phone.replace(/\D/g, "") === normalizedPhone
+        );
+      }
 
       let nextPatients: Patient[];
       if (matched) {
+        const ensuredCode =
+          matched.patient_code || generatePatientCode(settings, patients);
+        const qrCardUrl =
+          matched.qr_card_url ||
+          (await generatePatientIdQrDataUrl(ensuredCode).catch(() => null));
         matched = {
           ...matched,
-          name: name?.trim() ? name.trim() : matched.name,
+          patient_code: ensuredCode,
+          name: trimmedName || matched.name,
+          qr_card_url: qrCardUrl,
           preferred_language: lang,
         };
         nextPatients = patients.map((p) =>
           p.id === matched!.id ? matched! : p
         );
       } else {
-        // Crucial: Zero automatic credit points on new account registration!
+        // New account registration: auto-generate Patient ID ([ClinicPrefix]YYMMDDTTTT) and 0 credit points
+        isNewAccount = true;
+        const newPatientCode = generatePatientCode(settings, patients);
+        const qrCardUrl = await generatePatientIdQrDataUrl(
+          newPatientCode
+        ).catch(() => null);
         matched = {
           id: crypto.randomUUID(),
+          patient_code: newPatientCode,
           phone: normalizedPhone,
-          name: name?.trim() || `လူနာ (${normalizedPhone.slice(-4)})`,
+          name: trimmedName || `လူနာ (${normalizedPhone.slice(-4)})`,
           credit_points: 0,
           fcm_token: null,
           preferred_language: lang,
+          qr_card_url: qrCardUrl,
           created_at: new Date().toISOString(),
         };
         nextPatients = [...patients, matched];
@@ -1074,7 +1321,126 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         receptionNotifications,
       });
 
-      return matched;
+      return { patient: matched, isNewAccount };
+    },
+    [
+      patients,
+      settings,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      receptionNotifications,
+      lang,
+      persistState,
+    ]
+  );
+
+  const loginWithPhoneOtp = useCallback(
+    async (phone: string, name?: string): Promise<Patient> => {
+      const res = await loginOrRegisterPatient({
+        mode: "register_or_phone",
+        phone,
+        name: name?.trim() || `လူနာ (${phone.replace(/\D/g, "").slice(-4)})`,
+      });
+      return res.patient;
+    },
+    [loginOrRegisterPatient]
+  );
+
+  const updatePatientPhoneByReception = useCallback(
+    async ({
+      patientId,
+      newPhone,
+      nrcOrLicense,
+      newName,
+    }: {
+      patientId: string;
+      newPhone: string;
+      nrcOrLicense: string;
+      newName?: string;
+    }): Promise<Patient> => {
+      const target = patients.find((p) => p.id === patientId);
+      if (!target) {
+        throw new Error(
+          lang === "my" ? "လူနာအကောင့် မတွေ့ရှိပါ။" : "Patient not found."
+        );
+      }
+
+      const cleanedNewPhone = newPhone.replace(/\D/g, "");
+      if (cleanedNewPhone.length < 7) {
+        throw new Error(
+          lang === "my"
+            ? "ဖုန်းနံပါတ်အသစ်ကို မှန်ကန်စွာ ရိုက်ထည့်ပါ။"
+            : "Please enter a valid new phone number."
+        );
+      }
+
+      if (!nrcOrLicense.trim()) {
+        throw new Error(
+          lang === "my"
+            ? "လူနာ၏ မှတ်ပုံတင်အမှတ် သို့မဟုတ် ယာဉ်မောင်းလိုင်စင်အမှတ်ကို ရိုက်ထည့်အတည်ပြုပေးပါ။"
+            : "Please enter the patient's NRC or Driver's License number for verification."
+        );
+      }
+
+      const duplicate = patients.find(
+        (p) =>
+          p.id !== patientId && p.phone.replace(/\D/g, "") === cleanedNewPhone
+      );
+      if (duplicate) {
+        throw new Error(
+          lang === "my"
+            ? `ဤဖုန်းနံပါတ် (${cleanedNewPhone}) ကို အခြားလူနာ (${duplicate.name} • ${duplicate.patient_code}) မှ အသုံးပြုထားပြီးဖြစ်ပါသည်။`
+            : `This phone number (${cleanedNewPhone}) is already linked to another patient (${duplicate.name}).`
+        );
+      }
+
+      const prevPhones = Array.from(
+        new Set([...(target.previous_phones || []), target.phone])
+      );
+      const updatedPatient: Patient = {
+        ...target,
+        phone: cleanedNewPhone,
+        name: newName?.trim() ? newName.trim() : target.name,
+        nrc_or_license: nrcOrLicense.trim(),
+        previous_phones: prevPhones,
+      };
+
+      const nextPatients = patients.map((p) =>
+        p.id === patientId ? updatedPatient : p
+      );
+
+      const verifyMsg: ClinicMessage = {
+        id: crypto.randomUUID(),
+        doctor_id: null,
+        booking_id: null,
+        patient_id: updatedPatient.id,
+        kind: "automated",
+        category: "info",
+        title_my: "ဖုန်းနံပါတ်အသစ် ပြောင်းလဲချိတ်ဆက်ပြီးပါပြီ",
+        body_my: `လူနာ ID (${updatedPatient.patient_code}) အတွက် မှတ်ပုံတင်/လိုင်စင် (${updatedPatient.nrc_or_license}) စစ်ဆေးပြီး ဖုန်းနံပါတ်အသစ် (${cleanedNewPhone}) သို့ ပြောင်းလဲပေးပြီးပါပြီ။ လက်ကျန်ပွိုင့် ${updatedPatient.credit_points.toLocaleString()} MMK အပြည့်အဝ ပြန်လည်အသုံးပြုနိုင်ပါပြီ။`,
+        title_en: "Phone Number Updated & Account Recovered",
+        body_en: `Your Patient ID (${updatedPatient.patient_code}) has been linked to your new phone (${cleanedNewPhone}) after NRC/License verification. All ${updatedPatient.credit_points.toLocaleString()} MMK Credit Points are ready to use.`,
+        message_date: TODAY_STR,
+        created_at: new Date().toISOString(),
+      };
+
+      const nextMessages = [verifyMsg, ...messages];
+      setPatients(nextPatients);
+      setMessages(nextMessages);
+
+      persistState({
+        settings,
+        patients: nextPatients,
+        doctors,
+        bookings,
+        transactions,
+        messages: nextMessages,
+        receptionNotifications,
+      });
+
+      return updatedPatient;
     },
     [
       patients,
@@ -1157,7 +1523,11 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const nextQueueNumber = highestBookedQueue + 1;
       const bookingId = crypto.randomUUID();
       const ticketCode = `AC-${doctor.room_number}-${nextQueueNumber}`;
-      const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
+      const qrDataUrl = await generateTicketQrDataUrl(
+        bookingId,
+        ticketCode,
+        currentPatient.patient_code
+      );
 
       // Mark any older completed bookings for this patient as archived so the new booking is active
       const cleanedOldBookings = bookings.map((b) =>
@@ -1203,6 +1573,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         type: "new_booking",
         booking_id: newBooking.id,
         patient_id: currentPatient.id,
+        patient_code: currentPatient.patient_code,
         patient_name: currentPatient.name,
         patient_phone: currentPatient.phone,
         doctor_id: doctor.id,
@@ -1297,13 +1668,19 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           (p) => p.phone.replace(/\D/g, "") === cleanedPhone
         );
         if (!pat) {
+          const newPatientCode = generatePatientCode(settings, nextPatients);
+          const qrCardUrl = await generatePatientIdQrDataUrl(
+            newPatientCode
+          ).catch(() => null);
           pat = {
             id: crypto.randomUUID(),
+            patient_code: newPatientCode,
             phone: cleanedPhone,
             name: patientName.trim() || `လူနာ (${cleanedPhone.slice(-4)})`,
             credit_points: 0,
             fcm_token: null,
             preferred_language: "my",
+            qr_card_url: qrCardUrl,
             created_at: new Date().toISOString(),
           };
           nextPatients.push(pat);
@@ -1337,7 +1714,11 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const ticketCode = `${isPriority ? "VIP" : "RC"}-${
         doctor.room_number
       }-${nextQueueNumber}`;
-      const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
+      const qrDataUrl = await generateTicketQrDataUrl(
+        bookingId,
+        ticketCode,
+        pat.patient_code
+      );
 
       const newBooking: Booking = {
         id: bookingId,
@@ -2691,6 +3072,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isRealtimeConnected,
         loginWithPhoneOtp,
+        loginOrRegisterPatient,
+        updatePatientPhoneByReception,
         logoutPatient,
         createBooking,
         createWalkInBooking,

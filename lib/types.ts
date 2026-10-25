@@ -31,6 +31,7 @@ export interface PaymentAccountSetting {
 export interface ClinicSettings {
   clinicName: string;
   clinicNameMy: string;
+  clinicCodePrefix?: string;
   subtitleEn: string;
   subtitleMy: string;
   logoUrl: string;
@@ -51,11 +52,15 @@ export interface ClinicSettings {
 
 export interface Patient {
   id: string;
+  patient_code: string;
   phone: string;
   name: string;
   credit_points: number;
   fcm_token: string | null;
   preferred_language: Lang;
+  nrc_or_license?: string | null;
+  previous_phones?: string[];
+  qr_card_url?: string | null;
   created_at?: string;
 }
 
@@ -109,6 +114,7 @@ export interface ReceptionNotification {
   type: "new_booking" | "cancel_request" | "booking_cancelled";
   booking_id: string;
   patient_id: string;
+  patient_code?: string;
   patient_name: string;
   patient_phone: string;
   doctor_id: string;

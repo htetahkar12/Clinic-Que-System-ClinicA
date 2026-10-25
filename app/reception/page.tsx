@@ -7,6 +7,7 @@ import {
   DoctorFormInput,
   SPECIALTY_PRESETS,
   generateDoctorCode,
+  extractPatientQueryFromQrText,
 } from "@/lib/clinic-store";
 import { Doctor, DoctorStatus } from "@/lib/types";
 import { MANUAL_TEMPLATES } from "@/lib/messages";
@@ -68,6 +69,7 @@ export default function ReceptionCommandCenterPage() {
     sendClinicMessage,
     createWalkInBooking,
     updateReceptionPin,
+    updatePatientPhoneByReception,
   } = useClinic();
 
   // Staff Password Gate — Blank input, no password hint shown
@@ -122,6 +124,95 @@ export default function ReceptionCommandCenterPage() {
   const [directorySearch, setDirectorySearch] = useState("");
   const [directorySpecialtyFilter, setDirectorySpecialtyFilter] =
     useState("all");
+
+  // Patient Directory, QR/ID Lookup & NRC/License Phone Recovery Modal State
+  const [isPatientLookupModalOpen, setIsPatientLookupModalOpen] =
+    useState(false);
+  const [patientLookupQuery, setPatientLookupQuery] = useState("");
+  const [isCameraQrActive, setIsCameraQrActive] = useState(false);
+  const [cameraQrError, setCameraQrError] = useState("");
+  const qrVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [editingPhonePatientId, setEditingPhonePatientId] = useState<
+    string | null
+  >(null);
+  const [newPhoneInput, setNewPhoneInput] = useState("");
+  const [nrcOrLicenseInput, setNrcOrLicenseInput] = useState("");
+  const [editPatientNameInput, setEditPatientNameInput] = useState("");
+  const [phoneChangeError, setPhoneChangeError] = useState("");
+
+  // Live Camera QR Scanner Effect when `isCameraQrActive` is enabled
+  useEffect(() => {
+    if (!isCameraQrActive || typeof window === "undefined") return;
+    let stream: MediaStream | null = null;
+    let scanTimer: number | null = null;
+    let cancelled = false;
+
+    const startScanner = async () => {
+      try {
+        setCameraQrError("");
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        if (qrVideoRef.current) {
+          qrVideoRef.current.srcObject = stream;
+          await qrVideoRef.current.play().catch(() => {});
+        }
+
+        const BarcodeDetectorClass = (
+          window as unknown as {
+            BarcodeDetector?: new (opts: { formats: string[] }) => {
+              detect: (
+                video: HTMLVideoElement
+              ) => Promise<Array<{ rawValue?: string }>>;
+            };
+          }
+        ).BarcodeDetector;
+
+        if (BarcodeDetectorClass) {
+          const detector = new BarcodeDetectorClass({ formats: ["qr_code"] });
+          scanTimer = window.setInterval(async () => {
+            if (!qrVideoRef.current) return;
+            try {
+              const codes = await detector.detect(qrVideoRef.current);
+              if (codes.length > 0 && codes[0].rawValue) {
+                const extracted = extractPatientQueryFromQrText(
+                  codes[0].rawValue
+                );
+                if (extracted) {
+                  setPatientLookupQuery(extracted);
+                  setIsCameraQrActive(false);
+                }
+              }
+            } catch {
+              // Ignore frame detection error
+            }
+          }, 350);
+        } else {
+          setCameraQrError(
+            "သင့် Browser တွင် တိုက်ရိုက် Camera QR Detector မပါဝင်သေးပါ။ QR Scanner စက်ဖြင့် ဖတ်နိုင်သလို လူနာ ID နံပါတ် (ဥပမာ - ASC2610250001) ကို အပေါ်အကွက်တွင် တိုက်ရိုက် ရိုက်ထည့်ရှာဖွေနိုင်ပါသည်။"
+          );
+        }
+      } catch {
+        setCameraQrError(
+          "ကင်မရာ ဖွင့်၍မရပါ။ ကင်မရာ Permission ပေးပါ သို့မဟုတ် လူနာ ID နံပါတ်ဖြင့် တိုက်ရိုက် ရှာဖွေပါ။"
+        );
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      cancelled = true;
+      if (scanTimer) window.clearInterval(scanTimer);
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [isCameraQrActive]);
 
   // 2. Doctor Status / Postpone / Delay Modal State
   const [statusModalDoctor, setStatusModalDoctor] = useState<Doctor | null>(
@@ -678,6 +769,25 @@ export default function ReceptionCommandCenterPage() {
                 {lang === "my"
                   ? "ဆရာဝန် ထည့် / ပြန်ရွေးမည်"
                   : "Add / Select Doctor"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPatientLookupQuery("");
+                setEditingPhonePatientId(null);
+                setPhoneChangeError("");
+                setIsCameraQrActive(false);
+                setIsPatientLookupModalOpen(true);
+              }}
+              className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-amber-300/60 bg-amber-500/20 px-4 py-2 text-xs font-black text-amber-200 shadow-sm hover:bg-amber-500/30 sm:text-sm"
+            >
+              <QrCode className="h-4 w-4 text-amber-300 sm:h-5 sm:w-5" />
+              <span>
+                {lang === "my"
+                  ? `လူနာ ID / QR ရှာရန်နှင့် ဖုန်းနံပါတ်ပြောင်းရန် (${patients.length})`
+                  : `Patient ID / QR Lookup (${patients.length})`}
               </span>
             </button>
 
@@ -2589,7 +2699,7 @@ export default function ReceptionCommandCenterPage() {
                     >
                       {patients.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name} ({p.phone}) — Credit:{" "}
+                          [{p.patient_code}] {p.name} ({p.phone}) — Credit:{" "}
                           {formatCurrency(p.credit_points, lang)}
                         </option>
                       ))}
@@ -2846,6 +2956,394 @@ export default function ReceptionCommandCenterPage() {
             >
               {lang === "my" ? "ပိတ်မည်" : "Close Preview"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 7: PATIENT DIRECTORY, QR/ID LOOKUP & NRC/LICENSE PHONE RECOVERY
+      ===================================================================== */}
+      {isPatientLookupModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 sm:p-5">
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border-2 border-slate-300 bg-white p-5 shadow-2xl sm:p-7">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-100 pb-4">
+              <div>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 px-3 py-1 text-xs font-black text-indigo-950">
+                  <QrCode className="h-3.5 w-3.5" />
+                  {lang === "my"
+                    ? "လူနာစာရင်း • ID နှင့် QR ရှာဖွေရေး • ဖုန်းနံပါတ်အသစ် ပြောင်းပေးရန်"
+                    : "Patient ID / QR Lookup & Phone Recovery"}
+                </span>
+                <h3 className="mt-1.5 text-xl font-black text-slate-950 sm:text-2xl">
+                  {lang === "my"
+                    ? `ဆေးခန်းရှိ လူနာအကောင့်များ (${patients.length} ဦး)`
+                    : `Registered Clinic Patients (${patients.length})`}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCameraQrActive((prev) => !prev)}
+                  className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl border-2 px-3.5 py-2 text-xs font-black sm:text-sm ${
+                    isCameraQrActive
+                      ? "border-red-700 bg-red-600 text-white"
+                      : "border-indigo-700 bg-indigo-50 text-indigo-950 hover:bg-indigo-100"
+                  }`}
+                >
+                  <QrCode className="h-4 w-4" />
+                  <span>
+                    {isCameraQrActive
+                      ? lang === "my"
+                        ? "ကင်မရာ QR ပိတ်မည်"
+                        : "Stop QR Camera"
+                      : lang === "my"
+                      ? "ကင်မရာဖြင့် QR ဖတ်မည်"
+                      : "Scan Patient QR"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCameraQrActive(false);
+                    setIsPatientLookupModalOpen(false);
+                  }}
+                  className="rounded-xl border-2 border-slate-300 px-3 py-2 text-sm font-black text-slate-800 hover:bg-slate-100"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Live Camera QR Scanner Box */}
+            {isCameraQrActive && (
+              <div className="mb-4 rounded-2xl border-2 border-indigo-700 bg-slate-950 p-4 text-white">
+                <p className="mb-2 text-center text-xs font-bold text-sky-200 sm:text-sm">
+                  {lang === "my"
+                    ? "လူနာ၏ ဖုန်းပေါ်ရှိ QR ကုဒ် (သို့မဟုတ် လက်မှတ် QR) ကို ကင်မရာရှေ့တွင် ပြသပါ"
+                    : "Hold the patient's QR Card or Ticket QR in front of the camera"}
+                </p>
+                <video
+                  ref={qrVideoRef}
+                  muted
+                  playsInline
+                  className="mx-auto max-h-60 w-full max-w-sm rounded-xl border-2 border-white/20 bg-black object-cover"
+                />
+                {cameraQrError && (
+                  <p className="mt-2 rounded-xl bg-amber-500/20 p-2.5 text-center text-xs font-bold text-amber-200">
+                    {cameraQrError}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Search Input (Supports Patient ID, Name, Phone, or Pasted QR URL) */}
+            <div className="mb-5">
+              <label className="mb-1.5 block text-xs font-extrabold uppercase tracking-wider text-slate-700 sm:text-sm">
+                {lang === "my"
+                  ? "လူနာ ID (ဥပမာ - ASC2610250001)၊ အမည်၊ ဖုန်းနံပါတ် သို့မဟုတ် QR Scanner ဖြင့် ရှာဖွေပါ"
+                  : "Search by Patient ID (e.g. ASC2610250001), Name, Phone, or QR Scan"}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={patientLookupQuery}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (
+                      val.includes("pid=") ||
+                      val.startsWith("http://") ||
+                      val.startsWith("https://")
+                    ) {
+                      setPatientLookupQuery(extractPatientQueryFromQrText(val));
+                    } else {
+                      setPatientLookupQuery(val);
+                    }
+                  }}
+                  placeholder={
+                    lang === "my"
+                      ? "လူနာ ID နံပါတ် / အမည် / ဖုန်းနံပါတ် ရိုက်ထည့်ပါ..."
+                      : "Type Patient ID, Name, or Phone..."
+                  }
+                  className="min-h-[52px] flex-1 rounded-2xl border-2 border-slate-900 bg-slate-50 px-4 font-mono text-base font-black text-slate-950 placeholder:font-sans placeholder:text-slate-400 focus:outline-none sm:text-lg"
+                />
+                {patientLookupQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setPatientLookupQuery("")}
+                    className="rounded-2xl border-2 border-slate-300 bg-white px-4 text-xs font-black text-slate-800 hover:bg-slate-100 sm:text-sm"
+                  >
+                    {lang === "my" ? "ရှင်းမည်" : "Clear"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Filtered Patients List */}
+            <div className="space-y-3">
+              {patients
+                .filter((p) => {
+                  const q = patientLookupQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  const matchCode = (p.patient_code || "")
+                    .toLowerCase()
+                    .includes(q);
+                  const matchName = p.name.toLowerCase().includes(q);
+                  const matchPhone = p.phone.toLowerCase().includes(q);
+                  const matchPrevPhone = (p.previous_phones || []).some((old) =>
+                    old.toLowerCase().includes(q)
+                  );
+                  return (
+                    matchCode || matchName || matchPhone || matchPrevPhone
+                  );
+                })
+                .map((patient) => {
+                  const isEditingThisPatient =
+                    editingPhonePatientId === patient.id;
+                  const patientBookingsToday = bookings.filter(
+                    (b) =>
+                      b.patient_id === patient.id &&
+                      b.status !== "cancelled" &&
+                      b.status !== "no_show"
+                  );
+
+                  return (
+                    <div
+                      key={patient.id}
+                      className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-4 transition-all hover:border-indigo-400"
+                    >
+                      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-lg bg-indigo-950 px-3 py-1 font-mono text-xs font-black text-amber-300 sm:text-sm">
+                              ID: {patient.patient_code}
+                            </span>
+                            <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-950">
+                              Credit: {formatCurrency(patient.credit_points, lang)}
+                            </span>
+                            {patient.nrc_or_license && (
+                              <span className="rounded-lg bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-900">
+                                မှတ်ပုံတင်/လိုင်စင် - {patient.nrc_or_license}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-base font-black text-slate-950 sm:text-lg">
+                            {patient.name} •{" "}
+                            <span className="font-mono text-blue-800">
+                              {patient.phone}
+                            </span>
+                          </h4>
+                          {patient.previous_phones &&
+                            patient.previous_phones.length > 0 && (
+                              <p className="text-xs font-bold text-slate-500">
+                                {lang === "my"
+                                  ? `ယခင်ဖုန်းနံပါတ်ဟောင်း - ${patient.previous_phones.join(
+                                      ", "
+                                    )}`
+                                  : `Previous Phones: ${patient.previous_phones.join(
+                                      ", "
+                                    )}`}
+                              </p>
+                            )}
+                          {patientBookingsToday.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {patientBookingsToday.map((b) => {
+                                const doc = doctors.find(
+                                  (d) => d.id === b.doctor_id
+                                );
+                                return (
+                                  <span
+                                    key={b.id}
+                                    className="rounded-lg border border-indigo-200 bg-white px-2.5 py-0.5 text-xs font-extrabold text-indigo-950"
+                                  >
+                                    {doc?.name_my || doc?.name} • Queue #
+                                    {b.queue_number} ({b.payment_status})
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isEditingThisPatient) {
+                                setEditingPhonePatientId(null);
+                                setPhoneChangeError("");
+                              } else {
+                                setEditingPhonePatientId(patient.id);
+                                setNewPhoneInput(patient.phone);
+                                setNrcOrLicenseInput(
+                                  patient.nrc_or_license || ""
+                                );
+                                setEditPatientNameInput(patient.name);
+                                setPhoneChangeError("");
+                              }
+                            }}
+                            className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border-2 border-amber-700 bg-amber-50 px-3.5 py-2 text-xs font-black text-amber-950 hover:bg-amber-100 sm:text-sm"
+                          >
+                            <KeyRound className="h-4 w-4 text-amber-700" />
+                            <span>
+                              {lang === "my"
+                                ? "မှတ်ပုံတင်/လိုင်စင်စစ်၍ ဖုန်းနံပါတ်ပြောင်းပေးမည်"
+                                : "Verify NRC & Update Phone"}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsPatientLookupModalOpen(false);
+                              setIsCameraQrActive(false);
+                              setWalkInModalDoctor(
+                                activeDoctors[0] || doctors[0] || null
+                              );
+                              setWalkInPatientMode("existing");
+                              setWalkInExistingPatientId(patient.id);
+                              setWalkInPayment(
+                                patient.credit_points >= 15000
+                                  ? "credit_points"
+                                  : "cash"
+                              );
+                              setCreatedTicketId(null);
+                            }}
+                            className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-800 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:opacity-95 sm:text-sm"
+                          >
+                            <UserPlus className="h-4 w-4" />
+                            <span>
+                              {lang === "my"
+                                ? "Booking တင်ပေးမည်"
+                                : "Book Queue"}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Inline NRC / Driver's License Verification & Phone Update Form */}
+                      {isEditingThisPatient && (
+                        <div className="mt-4 rounded-2xl border-2 border-amber-600 bg-white p-4 shadow-sm">
+                          <h5 className="text-sm font-black text-slate-950 sm:text-base">
+                            {lang === "my"
+                              ? `လူနာ ID (${patient.patient_code}) အတွက် မှတ်ပုံတင်/ယာဉ်မောင်းလိုင်စင် စစ်ဆေးပြီး ဖုန်းနံပါတ်အသစ် ပြောင်းလဲပေးရန်`
+                              : `Verify NRC/Driver's License & Update Phone for ${patient.patient_code}`}
+                          </h5>
+                          <p className="mt-0.5 text-xs font-bold text-slate-600">
+                            {lang === "my"
+                              ? "ဖုန်းနံပါတ်အသစ် ပြောင်းလဲပြီးသည်နှင့် ဤလူနာ၏ လက်ကျန် Credit Points များအားလုံး ဖုန်းနံပါတ်အသစ်သို့ အလိုအလျောက် ပါဝင်သွားပါမည်။"
+                              : "Updating the phone number preserves all Credit Points and history on this patient account."}
+                          </p>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div>
+                              <label className="mb-1 block text-xs font-extrabold text-slate-900">
+                                {lang === "my"
+                                  ? "မှတ်ပုံတင် သို့မဟုတ် ယာဉ်မောင်းလိုင်စင် အမှတ် *"
+                                  : "NRC or Driver's License No. *"}
+                              </label>
+                              <input
+                                type="text"
+                                value={nrcOrLicenseInput}
+                                onChange={(e) =>
+                                  setNrcOrLicenseInput(e.target.value)
+                                }
+                                placeholder="ဥပမာ - ၁၂/မရက(နိုင်)၁၂၃၄၅၆"
+                                className="min-h-[44px] w-full rounded-xl border-2 border-slate-300 px-3 text-sm font-bold text-slate-950"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs font-extrabold text-slate-900">
+                                {lang === "my"
+                                  ? "ဖုန်းနံပါတ်အသစ် *"
+                                  : "New Phone Number *"}
+                              </label>
+                              <input
+                                type="tel"
+                                value={newPhoneInput}
+                                onChange={(e) =>
+                                  setNewPhoneInput(
+                                    e.target.value.replace(/[^0-9+]/g, "")
+                                  )
+                                }
+                                placeholder="09..."
+                                className="min-h-[44px] w-full rounded-xl border-2 border-slate-300 px-3 font-mono text-sm font-black text-slate-950"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs font-extrabold text-slate-900">
+                                {lang === "my"
+                                  ? "လူနာအမည်"
+                                  : "Patient Full Name"}
+                              </label>
+                              <input
+                                type="text"
+                                value={editPatientNameInput}
+                                onChange={(e) =>
+                                  setEditPatientNameInput(e.target.value)
+                                }
+                                className="min-h-[44px] w-full rounded-xl border-2 border-slate-300 px-3 text-sm font-bold text-slate-950"
+                              />
+                            </div>
+                          </div>
+
+                          {phoneChangeError && (
+                            <div className="mt-3 rounded-xl border border-red-600 bg-red-50 p-2.5 text-xs font-extrabold text-red-900">
+                              {phoneChangeError}
+                            </div>
+                          )}
+
+                          <div className="mt-3 flex flex-wrap justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPhonePatientId(null);
+                                setPhoneChangeError("");
+                              }}
+                              className="rounded-xl border border-slate-300 bg-slate-100 px-4 py-2 text-xs font-black text-slate-800"
+                            >
+                              {lang === "my" ? "မလုပ်တော့ပါ" : "Cancel"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setPhoneChangeError("");
+                                try {
+                                  const updated =
+                                    await updatePatientPhoneByReception({
+                                      patientId: patient.id,
+                                      newPhone: newPhoneInput,
+                                      nrcOrLicense: nrcOrLicenseInput,
+                                      newName: editPatientNameInput,
+                                    });
+                                  setEditingPhonePatientId(null);
+                                  setLastAnnouncement(
+                                    `လူနာ ${updated.name} (ID: ${updated.patient_code}) အတွက် မှတ်ပုံတင်/လိုင်စင် (${updated.nrc_or_license}) စစ်ဆေးအတည်ပြုပြီး ဖုန်းနံပါတ်အသစ် (${updated.phone}) သို့ ပြောင်းလဲပေးပြီးပါပြီ။ လက်ကျန် Credit Points (${formatCurrency(
+                                      updated.credit_points,
+                                      lang
+                                    )}) အပြည့်အဝ ပြန်လည်ရရှိပါပြီ။`
+                                  );
+                                } catch (err) {
+                                  setPhoneChangeError(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "Could not update phone number."
+                                  );
+                                }
+                              }}
+                              className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-emerald-800 sm:text-sm"
+                            >
+                              {lang === "my"
+                                ? "အတည်ပြုပြီး ဖုန်းနံပါတ်အသစ်သို့ ပြောင်းမည်"
+                                : "Confirm & Update Phone"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
       )}

@@ -109,9 +109,159 @@ export const INITIAL_SETTINGS: ClinicSettings = {
   },
 };
 
+export interface SpecialtyPreset {
+  codePrefix: string;
+  specialty_my: string;
+  specialty_en: string;
+  defaultRoom: string;
+  defaultFee: number;
+}
+
+export const SPECIALTY_PRESETS: SpecialtyPreset[] = [
+  {
+    codePrefix: "CARD",
+    specialty_my: "နှလုံးနှင့် သွေးတိုး အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Senior Cardiologist (Heart & Blood Pressure)",
+    defaultRoom: "101",
+    defaultFee: 15000,
+  },
+  {
+    codePrefix: "GEN",
+    specialty_my: "အထွေထွေရောဂါနှင့် သက်ကြီးရွယ်အို ကျန်းမာရေး အထူးကု",
+    specialty_en: "General Physician & Senior Citizen Care",
+    defaultRoom: "102",
+    defaultFee: 15000,
+  },
+  {
+    codePrefix: "PED",
+    specialty_my: "ကလေးအထူးကု ဆရာဝန်ကြီး",
+    specialty_en: "Senior Pediatrician (Child Health Specialist)",
+    defaultRoom: "103",
+    defaultFee: 15000,
+  },
+  {
+    codePrefix: "OBGYN",
+    specialty_my: "သားဖွားနှင့် မီးယပ် အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Obstetrician & Gynecologist (OB/GYN)",
+    defaultRoom: "104",
+    defaultFee: 20000,
+  },
+  {
+    codePrefix: "ORTHO",
+    specialty_my: "အရိုး၊ အကြောနှင့် အဆစ်အမြစ် အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Orthopedic, Bone & Joint Specialist",
+    defaultRoom: "105",
+    defaultFee: 20000,
+  },
+  {
+    codePrefix: "EYE",
+    specialty_my: "မျက်စိနှင့် အတွင်းတိမ် အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Eye & Cataract Specialist (Ophthalmology)",
+    defaultRoom: "201",
+    defaultFee: 20000,
+  },
+  {
+    codePrefix: "NEURO",
+    specialty_my: "ဦးနှောက်နှင့် အာရုံကြော အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Senior Neurologist (Brain & Nerve Specialist)",
+    defaultRoom: "202",
+    defaultFee: 25000,
+  },
+  {
+    codePrefix: "ENT",
+    specialty_my: "နား၊ နှာခေါင်း၊ လည်ချောင်း အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "ENT Specialist (Ear, Nose & Throat)",
+    defaultRoom: "203",
+    defaultFee: 15000,
+  },
+  {
+    codePrefix: "DERM",
+    specialty_my: "အရေပြားနှင့် အလှအပရေးရာ အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Consultant Dermatologist (Skin Specialist)",
+    defaultRoom: "204",
+    defaultFee: 15000,
+  },
+  {
+    codePrefix: "GI",
+    specialty_my: "အစာအိမ်၊ အူလမ်းကြောင်းနှင့် အသည်း အထူးကုဆရာဝန်ကြီး",
+    specialty_en: "Gastroenterologist & Hepatologist",
+    defaultRoom: "205",
+    defaultFee: 20000,
+  },
+];
+
+export function generateDoctorCode(
+  specialtyText: string,
+  roomNumber?: string,
+  fallbackSeq = 1
+): string {
+  const s = (specialtyText || "").toLowerCase();
+  let prefix = "DR";
+  if (s.includes("နှလုံး") || s.includes("cardio") || s.includes("heart")) {
+    prefix = "CARD";
+  } else if (
+    s.includes("အထွေထွေ") ||
+    s.includes("general") ||
+    s.includes("physician")
+  ) {
+    prefix = "GEN";
+  } else if (
+    s.includes("ကလေး") ||
+    s.includes("pediat") ||
+    s.includes("child")
+  ) {
+    prefix = "PED";
+  } else if (
+    s.includes("သားဖွား") ||
+    s.includes("မီးယပ်") ||
+    s.includes("gyne") ||
+    s.includes("obstet") ||
+    s.includes("og")
+  ) {
+    prefix = "OBGYN";
+  } else if (
+    s.includes("အရိုး") ||
+    s.includes("ortho") ||
+    s.includes("bone") ||
+    s.includes("joint")
+  ) {
+    prefix = "ORTHO";
+  } else if (
+    s.includes("မျက်စိ") ||
+    s.includes("eye") ||
+    s.includes("ophthal")
+  ) {
+    prefix = "EYE";
+  } else if (
+    s.includes("ဦးနှောက်") ||
+    s.includes("အာရုံကြော") ||
+    s.includes("neuro")
+  ) {
+    prefix = "NEURO";
+  } else if (s.includes("နား") || s.includes("နှာခေါင်း") || s.includes("ent")) {
+    prefix = "ENT";
+  } else if (
+    s.includes("အရေပြား") ||
+    s.includes("derm") ||
+    s.includes("skin")
+  ) {
+    prefix = "DERM";
+  } else if (
+    s.includes("အစာအိမ်") ||
+    s.includes("အသည်း") ||
+    s.includes("gastro")
+  ) {
+    prefix = "GI";
+  }
+  const cleanRoom = (roomNumber || "").replace(/[^0-9A-Za-z]/g, "");
+  const suffix = cleanRoom || String(100 + fallbackSeq);
+  return `${prefix}-${suffix}`;
+}
+
 export const INITIAL_DOCTORS: Doctor[] = [
   {
     id: "11111111-1111-4111-8111-111111111101",
+    doctor_code: "CARD-101",
     name: "Dr. Aung Kyaw Moe",
     name_my: "ဒေါက်တာ အောင်ကျော်မိုး",
     specialty: "Senior Cardiologist (Heart & Blood Pressure)",
@@ -135,6 +285,7 @@ export const INITIAL_DOCTORS: Doctor[] = [
   },
   {
     id: "11111111-1111-4111-8111-111111111102",
+    doctor_code: "GEN-102",
     name: "Dr. May Thuzar Win",
     name_my: "ဒေါက်တာ မေသူဇာဝင်း",
     specialty: "General Physician & Senior Citizen Care",
@@ -158,19 +309,20 @@ export const INITIAL_DOCTORS: Doctor[] = [
   },
   {
     id: "11111111-1111-4111-8111-111111111103",
+    doctor_code: "ORTHO-105",
     name: "Dr. Zaw Min Tun",
     name_my: "ဒေါက်တာ ဇော်မင်းထွန်း",
     specialty: "Orthopedic, Bone & Joint Specialist",
     specialty_my: "အရိုး၊ အကြောနှင့် အဆစ်အမြစ် အထူးကုဆရာဝန်ကြီး",
     room_number: "105",
-    current_queue_number: 1,
+    current_queue_number: 0,
     queue_date: TODAY_STR,
     consultation_fee: 20000,
     start_time: "13:00",
     end_time: "16:00",
     max_patients: 25,
     avg_consult_minutes: 12,
-    status: "available",
+    status: "not_arrived",
     status_date: TODAY_STR,
     status_note: null,
     delay_minutes: 0,
@@ -181,19 +333,20 @@ export const INITIAL_DOCTORS: Doctor[] = [
   },
   {
     id: "11111111-1111-4111-8111-111111111104",
+    doctor_code: "EYE-201",
     name: "Dr. Khin Myat Noe",
     name_my: "ဒေါက်တာ ခင်မြတ်နိုး",
     specialty: "Eye & Cataract Specialist (Ophthalmology)",
     specialty_my: "မျက်စိနှင့် အတွင်းတိမ် အထူးကုဆရာဝန်ကြီး",
     room_number: "201",
-    current_queue_number: 2,
+    current_queue_number: 0,
     queue_date: TODAY_STR,
     consultation_fee: 20000,
     start_time: "14:00",
     end_time: "17:00",
     max_patients: 25,
     avg_consult_minutes: 10,
-    status: "available",
+    status: "not_arrived",
     status_date: TODAY_STR,
     status_note: null,
     delay_minutes: 0,
@@ -201,6 +354,103 @@ export const INITIAL_DOCTORS: Doctor[] = [
     is_active: true,
     is_archived: false,
     sort_order: 4,
+  },
+  // Saved Past Doctors who have practiced at this clinic (selectable by Name, Specialty & Code)
+  {
+    id: "11111111-1111-4111-8111-111111111105",
+    doctor_code: "PED-103",
+    name: "Dr. Thant Zin Oo",
+    name_my: "ဒေါက်တာ သန့်ဇင်ဦး",
+    specialty: "Senior Pediatrician (Child Health Specialist)",
+    specialty_my: "ကလေးအထူးကု ဆရာဝန်ကြီး",
+    room_number: "103",
+    current_queue_number: 0,
+    queue_date: TODAY_STR,
+    consultation_fee: 15000,
+    start_time: "10:00",
+    end_time: "13:00",
+    max_patients: 30,
+    avg_consult_minutes: 10,
+    status: "not_arrived",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
+    is_active: false,
+    is_archived: true,
+    sort_order: 5,
+  },
+  {
+    id: "11111111-1111-4111-8111-111111111106",
+    doctor_code: "OBGYN-104",
+    name: "Dr. Su Myat Mon",
+    name_my: "ဒေါက်တာ စုမြတ်မွန်",
+    specialty: "Obstetrician & Gynecologist (OB/GYN)",
+    specialty_my: "သားဖွားနှင့် မီးယပ် အထူးကုဆရာဝန်ကြီး",
+    room_number: "104",
+    current_queue_number: 0,
+    queue_date: TODAY_STR,
+    consultation_fee: 20000,
+    start_time: "15:00",
+    end_time: "18:00",
+    max_patients: 25,
+    avg_consult_minutes: 12,
+    status: "not_arrived",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
+    is_active: false,
+    is_archived: true,
+    sort_order: 6,
+  },
+  {
+    id: "11111111-1111-4111-8111-111111111107",
+    doctor_code: "NEURO-202",
+    name: "Dr. Kyaw Zayar",
+    name_my: "ဒေါက်တာ ကျော်ဇေယျ",
+    specialty: "Senior Neurologist (Brain & Nerve Specialist)",
+    specialty_my: "ဦးနှောက်နှင့် အာရုံကြော အထူးကုဆရာဝန်ကြီး",
+    room_number: "202",
+    current_queue_number: 0,
+    queue_date: TODAY_STR,
+    consultation_fee: 25000,
+    start_time: "16:00",
+    end_time: "19:00",
+    max_patients: 20,
+    avg_consult_minutes: 15,
+    status: "not_arrived",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
+    is_active: false,
+    is_archived: true,
+    sort_order: 7,
+  },
+  {
+    id: "11111111-1111-4111-8111-111111111108",
+    doctor_code: "ENT-203",
+    name: "Dr. Hnin Wai Lwin",
+    name_my: "ဒေါက်တာ နှင်းဝေလွင်",
+    specialty: "ENT Specialist (Ear, Nose & Throat)",
+    specialty_my: "နား၊ နှာခေါင်း၊ လည်ချောင်း အထူးကုဆရာဝန်ကြီး",
+    room_number: "203",
+    current_queue_number: 0,
+    queue_date: TODAY_STR,
+    consultation_fee: 15000,
+    start_time: "11:00",
+    end_time: "14:00",
+    max_patients: 30,
+    avg_consult_minutes: 10,
+    status: "not_arrived",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
+    is_active: false,
+    is_archived: true,
+    sort_order: 8,
   },
 ];
 
@@ -350,6 +600,7 @@ export interface PersistedClinicState {
 }
 
 export interface DoctorFormInput {
+  doctor_code?: string;
   name: string;
   name_my: string;
   specialty: string;
@@ -418,6 +669,13 @@ interface ClinicContextValue {
     input: Partial<DoctorFormInput>
   ) => Promise<void>;
   removeDoctor: (doctorId: string) => Promise<void>;
+  activateSavedDoctorForToday: (
+    doctorId: string,
+    overrides?: Partial<DoctorFormInput>
+  ) => Promise<Doctor | null>;
+  markDoctorArrivedAndStartQueue: (doctorId: string) => Promise<{
+    newQueueNumber: number;
+  }>;
   updateDoctorSessionStatus: (
     doctorId: string,
     params: {
@@ -1103,6 +1361,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         d.id === doctorId
           ? {
               ...d,
+              status:
+                d.status === "not_arrived" ? ("available" as const) : d.status,
               current_queue_number: newQueueNumber,
               queue_date: TODAY_STR,
             }
@@ -1659,22 +1919,32 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
   const addDoctor = useCallback(
     async (input: DoctorFormInput): Promise<Doctor> => {
+      const roomNum = input.room_number.trim() || "101";
+      const specMy = input.specialty_my.trim() || input.specialty.trim();
+      const specEn = input.specialty.trim() || input.specialty_my.trim();
+      const autoCode =
+        input.doctor_code?.trim() ||
+        generateDoctorCode(`${specMy} ${specEn}`, roomNum, doctors.length + 1);
+
       const newDoc: Doctor = {
         id: crypto.randomUUID(),
-        name: input.name.trim(),
+        doctor_code: autoCode,
+        name: input.name.trim() || input.name_my.trim(),
         name_my: input.name_my.trim() || input.name.trim(),
-        specialty: input.specialty.trim(),
-        specialty_my: input.specialty_my.trim() || input.specialty.trim(),
-        room_number: input.room_number.trim() || "101",
+        specialty: specEn,
+        specialty_my: specMy,
+        room_number: roomNum,
         current_queue_number: 0,
         queue_date: TODAY_STR,
         consultation_fee:
           Number(input.consultation_fee) || settings.defaultFee,
-        start_time: input.start_time || "09:00",
-        end_time: input.end_time || "12:00",
+        start_time: input.start_time.trim() || "အချိန်မရွေး",
+        end_time: input.end_time.trim() || "",
         max_patients: input.max_patients || 30,
         avg_consult_minutes: input.avg_consult_minutes || 10,
-        status: "available",
+        // Crucial: Adding a doctor does NOT automatically mark them as arrived/sitting!
+        // They start as "not_arrived" with current_queue_number = 0 until Reception confirms arrival.
+        status: "not_arrived",
         status_date: TODAY_STR,
         status_note: null,
         delay_minutes: 0,
@@ -1716,6 +1986,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...d,
               ...input,
+              doctor_code:
+                input.doctor_code?.trim() ||
+                d.doctor_code ||
+                generateDoctorCode(
+                  `${input.specialty_my || d.specialty_my} ${
+                    input.specialty || d.specialty
+                  }`,
+                  input.room_number || d.room_number
+                ),
               consultation_fee:
                 input.consultation_fee !== undefined
                   ? Number(input.consultation_fee)
@@ -1746,9 +2025,24 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  /**
+   * Removes a doctor from today's active schedule while keeping them saved
+   * in the clinic's doctor directory (`is_archived: true`) so Reception can
+   * easily re-select them in the future by Name, Specialty & Code.
+   */
   const removeDoctor = useCallback(
     async (doctorId: string) => {
-      const nextDoctors = doctors.filter((d) => d.id !== doctorId);
+      const nextDoctors = doctors.map((d) =>
+        d.id === doctorId
+          ? {
+              ...d,
+              is_archived: true,
+              is_active: false,
+              status: "not_arrived" as const,
+              current_queue_number: 0,
+            }
+          : d
+      );
       setDoctors(nextDoctors);
       persistState({
         settings,
@@ -1764,6 +2058,174 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       doctors,
       patients,
       bookings,
+      transactions,
+      messages,
+      receptionNotifications,
+      settings,
+      persistState,
+    ]
+  );
+
+  /**
+   * Re-activates a previously saved doctor onto today's schedule.
+   * Starts in "not_arrived" status with current_queue_number = 0 until Reception marks them arrived.
+   */
+  const activateSavedDoctorForToday = useCallback(
+    async (
+      doctorId: string,
+      overrides?: Partial<DoctorFormInput>
+    ): Promise<Doctor | null> => {
+      let updatedDoc: Doctor | null = null;
+      const nextDoctors = doctors.map((d) => {
+        if (d.id !== doctorId) return d;
+        const roomNum = overrides?.room_number?.trim() || d.room_number;
+        const specMy =
+          overrides?.specialty_my?.trim() || d.specialty_my || d.specialty;
+        const specEn =
+          overrides?.specialty?.trim() || d.specialty || d.specialty_my || "";
+        updatedDoc = {
+          ...d,
+          doctor_code:
+            overrides?.doctor_code?.trim() ||
+            d.doctor_code ||
+            generateDoctorCode(`${specMy} ${specEn}`, roomNum),
+          name: overrides?.name?.trim() || d.name,
+          name_my: overrides?.name_my?.trim() || d.name_my,
+          specialty: specEn,
+          specialty_my: specMy,
+          room_number: roomNum,
+          consultation_fee:
+            overrides?.consultation_fee !== undefined
+              ? Number(overrides.consultation_fee)
+              : d.consultation_fee,
+          start_time:
+            overrides?.start_time !== undefined
+              ? overrides.start_time.trim()
+              : d.start_time,
+          end_time:
+            overrides?.end_time !== undefined
+              ? overrides.end_time.trim()
+              : d.end_time,
+          is_archived: false,
+          is_active: true,
+          status: "not_arrived",
+          current_queue_number: 0,
+          queue_date: TODAY_STR,
+          delay_minutes: 0,
+          postponed_to: null,
+          status_note: null,
+        };
+        return updatedDoc;
+      });
+
+      setDoctors(nextDoctors);
+      persistState({
+        settings,
+        patients,
+        doctors: nextDoctors,
+        bookings,
+        transactions,
+        messages,
+        receptionNotifications,
+      });
+      return updatedDoc;
+    },
+    [
+      doctors,
+      patients,
+      bookings,
+      transactions,
+      messages,
+      receptionNotifications,
+      settings,
+      persistState,
+    ]
+  );
+
+  /**
+   * Reception confirms the doctor has arrived at the clinic:
+   * - Sets doctor.status = "available"
+   * - Starts queue at #1 (or keeps current_queue_number if already >= 1)
+   * - Marks booking #1 as "in_progress" and broadcasts arrival + turn #1 alerts
+   */
+  const markDoctorArrivedAndStartQueue = useCallback(
+    async (doctorId: string): Promise<{ newQueueNumber: number }> => {
+      const doc = doctors.find((d) => d.id === doctorId);
+      if (!doc) return { newQueueNumber: 1 };
+
+      const startQueueNum =
+        doc.current_queue_number > 0 ? doc.current_queue_number : 1;
+
+      const nextDoctors = doctors.map((d) =>
+        d.id === doctorId
+          ? {
+              ...d,
+              status: "available" as const,
+              status_date: TODAY_STR,
+              current_queue_number: startQueueNum,
+              queue_date: TODAY_STR,
+              delay_minutes: 0,
+              postponed_to: null,
+            }
+          : d
+      );
+
+      const nextBookings = bookings.map((b) => {
+        if (b.doctor_id !== doctorId) return b;
+        if (b.status === "cancelled" || b.status === "no_show") return b;
+        if (b.queue_number < startQueueNum) {
+          return { ...b, status: "completed" as const };
+        }
+        if (b.queue_number === startQueueNum) {
+          return {
+            ...b,
+            status: "in_progress" as const,
+            called_at: new Date().toISOString(),
+          };
+        }
+        return { ...b, status: "waiting" as const };
+      });
+
+      const arrivalTpl = templates.available(doc);
+      const newAutoMessages: ClinicMessage[] = [
+        {
+          id: crypto.randomUUID(),
+          doctor_id: doc.id,
+          booking_id: null,
+          patient_id: null,
+          kind: "automated",
+          category: arrivalTpl.category,
+          title_en: `${arrivalTpl.title_en} (Now Serving #${startQueueNum})`,
+          body_en: `${arrivalTpl.body_en} Queue #${startQueueNum} is now being called.`,
+          title_my: `${arrivalTpl.title_my} (အလှည့်နံပါတ် #${startQueueNum} စတင်ပြသနေပါပြီ)`,
+          body_my: `${arrivalTpl.body_my} အလှည့်နံပါတ် #${startQueueNum} မှစတင်၍ အခန်း (${doc.room_number}) သို့ ဝင်ရောက်ပြသနိုင်ပါပြီ။`,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        },
+      ];
+
+      const nextMessages = [...newAutoMessages, ...messages].slice(0, 60);
+
+      setDoctors(nextDoctors);
+      setBookings(nextBookings);
+      setMessages(nextMessages);
+
+      persistState({
+        settings,
+        patients,
+        doctors: nextDoctors,
+        bookings: nextBookings,
+        transactions,
+        messages: nextMessages,
+        receptionNotifications,
+      });
+
+      return { newQueueNumber: startQueueNum };
+    },
+    [
+      doctors,
+      bookings,
+      patients,
       transactions,
       messages,
       receptionNotifications,
@@ -1790,12 +2252,20 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const doc = doctors.find((d) => d.id === doctorId);
       if (!doc) return;
 
+      const nextQueueNum =
+        status === "available" && doc.current_queue_number === 0
+          ? 1
+          : status === "not_arrived"
+          ? 0
+          : doc.current_queue_number;
+
       const nextDoctors = doctors.map((d) =>
         d.id === doctorId
           ? {
               ...d,
               status,
               status_date: TODAY_STR,
+              current_queue_number: nextQueueNum,
               delay_minutes: status === "delayed" ? delayMinutes : 0,
               postponed_to: status === "postponed" ? postponedTo : null,
               status_note: note,
@@ -2181,6 +2651,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         addDoctor,
         updateDoctor,
         removeDoctor,
+        activateSavedDoctorForToday,
+        markDoctorArrivedAndStartQueue,
         updateDoctorSessionStatus,
         sendClinicMessage,
         addDemoCreditPoints,

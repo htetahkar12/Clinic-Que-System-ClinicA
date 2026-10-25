@@ -1,6 +1,11 @@
 export type Lang = "my" | "en";
 
-export type DoctorStatus = "available" | "delayed" | "postponed" | "off";
+export type DoctorStatus =
+  | "not_arrived"
+  | "available"
+  | "delayed"
+  | "postponed"
+  | "off";
 export type BookingStatus = "waiting" | "in_progress" | "completed" | "cancelled" | "no_show";
 export type PaymentStatus = "pending" | "paid" | "refunded" | "rejected" | "void";
 export type PaymentMethod = "kpay" | "wavepay" | "ayapay" | "credit_points" | "cash" | "refund";
@@ -56,6 +61,7 @@ export interface Patient {
 
 export interface Doctor {
   id: string;
+  doctor_code?: string;
   name: string;
   name_my: string | null;
   specialty: string;

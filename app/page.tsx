@@ -529,13 +529,21 @@ export default function PatientPortalPage() {
   if (view === "tracker" && activeBooking) {
     const doctor = doctors.find((d) => d.id === activeBooking.doctor_id);
     const currentServing = doctor?.current_queue_number ?? 0;
+    const isDoctorNotArrived =
+      doctor?.status === "not_arrived" || currentServing === 0;
     const myQueueNumber = activeBooking.queue_number;
-    const patientsAhead = Math.max(0, myQueueNumber - currentServing);
-    const isMyTurn = myQueueNumber === currentServing;
+    const patientsAhead = isDoctorNotArrived
+      ? Math.max(0, myQueueNumber - 1)
+      : Math.max(0, myQueueNumber - currentServing);
+    const isMyTurn = !isDoctorNotArrived && myQueueNumber === currentServing;
     const isPassedOrCompleted =
-      myQueueNumber < currentServing || activeBooking.status === "completed";
+      (!isDoctorNotArrived && myQueueNumber < currentServing) ||
+      activeBooking.status === "completed";
     const isApproaching =
-      !isPassedOrCompleted && patientsAhead > 0 && patientsAhead <= 3;
+      !isDoctorNotArrived &&
+      !isPassedOrCompleted &&
+      patientsAhead > 0 &&
+      patientsAhead <= 3;
     const avgMins = doctor?.avg_consult_minutes || 8;
     const estimatedWaitMinutes =
       patientsAhead * avgMins + (doctor?.delay_minutes || 0);
@@ -610,23 +618,33 @@ export default function PatientPortalPage() {
           </div>
         </div>
 
-        {/* Doctor Postponed / Delayed Warning Banner */}
+        {/* Doctor Not Arrived / Postponed / Delayed Status Banner */}
         {doctor && doctor.status !== "available" && (
           <div
             className={`mb-5 rounded-3xl border-4 p-4 shadow-md sm:p-5 ${
               doctor.status === "postponed"
                 ? "border-red-700 bg-gradient-to-r from-red-50 to-rose-100 text-red-950"
+                : doctor.status === "not_arrived"
+                ? "border-blue-600 bg-gradient-to-r from-blue-50 to-indigo-100 text-blue-950"
                 : "border-amber-600 bg-gradient-to-r from-amber-50 to-orange-100 text-amber-950"
             }`}
           >
             <div className="flex items-start gap-3">
-              <AlertTriangle className="h-7 w-7 shrink-0" />
+              {doctor.status === "not_arrived" ? (
+                <Clock className="h-7 w-7 shrink-0 text-blue-700" />
+              ) : (
+                <AlertTriangle className="h-7 w-7 shrink-0" />
+              )}
               <div>
                 <h2 className="text-lg font-black sm:text-xl">
                   {doctor.status === "postponed"
                     ? lang === "my"
                       ? "ဆရာဝန်ကြီး ယနေ့ ရက်ချိန်း ရွှေ့ဆိုင်းထားပါသည်"
                       : "Doctor Session Postponed"
+                    : doctor.status === "not_arrived"
+                    ? lang === "my"
+                      ? "ဆရာဝန်ကြီး မရောက်ရှိသေးပါ (ကြိုတင်အလှည့်နံပါတ် ရယူထားပြီးဖြစ်ပါသည်)"
+                      : "Doctor Has Not Arrived Yet (Your Queue Slot is Reserved)"
                     : lang === "my"
                     ? `ဆရာဝန်ကြီး ${doctor.delay_minutes} မိနစ်ခန့် နောက်ကျမည်ဖြစ်ပါသည်`
                     : `Doctor Delayed by ${doctor.delay_minutes} Minutes`}
@@ -638,6 +656,10 @@ export default function PatientPortalPage() {
                           doctor.postponed_to || "ထပ်မံအကြောင်းကြားပါမည်"
                         }`
                       : `Rescheduled Date: ${doctor.postponed_to || "TBA"}`
+                    : doctor.status === "not_arrived"
+                    ? lang === "my"
+                      ? "ဆရာဝန်ကြီး ဆေးခန်းသို့ ရောက်ရှိသည်နှင့် အလှည့်နံပါတ် (#1) မှ စတင်ပြသမည်ဖြစ်ပြီး သင့်ဖုန်းသို့ ချက်ချင်း အကြောင်းကြားပေးပါမည်။"
+                      : "As soon as the doctor arrives, Queue #1 will begin and you will receive a live notification."
                     : doctor.status_note ||
                       (lang === "my"
                         ? "အရေးပေါ်လူနာ ကြည့်ရှုနေပါသဖြင့် ခေတ္တစောင့်ဆိုင်းပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။"
@@ -724,10 +746,18 @@ export default function PatientPortalPage() {
                 : "Now Serving in Clinic"}
             </span>
             <span className="queue-number-fluid my-2 font-black tracking-tighter text-white">
-              #{currentServing}
+              {isDoctorNotArrived
+                ? lang === "my"
+                  ? "မစသေးပါ"
+                  : "Waiting"
+                : `#${currentServing}`}
             </span>
             <span className="rounded-xl bg-white/15 px-3.5 py-1 text-xs font-bold text-slate-100 sm:text-sm">
-              {lang === "my"
+              {isDoctorNotArrived
+                ? lang === "my"
+                  ? "ဆရာဝန်ရောက်လျှင် #1 စတင်ပါမည်"
+                  : "Starts at #1 when doctor arrives"
+                : lang === "my"
                 ? `အခန်း (${doctor?.room_number}) • ${doctor?.name_my}`
                 : `Room ${doctor?.room_number} • ${doctor?.name}`}
             </span>
@@ -994,7 +1024,8 @@ export default function PatientPortalPage() {
                 </div>
               </div>
             </div>
-          ) : activeBooking.status === "waiting" && patientsAhead >= 2 ? (
+          ) : activeBooking.status === "waiting" &&
+            myQueueNumber - currentServing >= 2 ? (
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div>
                 <h4 className="text-base font-black text-slate-900">
@@ -1448,22 +1479,38 @@ export default function PatientPortalPage() {
               >
                 <div className="min-w-0 space-y-2.5">
                   <div className="flex flex-wrap items-center gap-2">
+                    {doctor.doctor_code && (
+                      <span className="rounded-xl bg-indigo-950 px-2.5 py-1 font-mono text-xs font-black text-amber-300">
+                        {doctor.doctor_code}
+                      </span>
+                    )}
                     <span className="rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 px-3 py-1 text-xs font-black uppercase tracking-wider text-white">
                       {lang === "my"
                         ? `အခန်း ${doctor.room_number}`
                         : `Room ${doctor.room_number}`}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-xl bg-blue-50 px-3 py-1 text-xs font-extrabold text-blue-900">
-                      <CalendarClock className="h-3.5 w-3.5" />
-                      {doctor.start_time} – {doctor.end_time}
-                    </span>
+                    {doctor.start_time && (
+                      <span className="inline-flex items-center gap-1 rounded-xl bg-blue-50 px-3 py-1 text-xs font-extrabold text-blue-900">
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        {doctor.end_time
+                          ? `${doctor.start_time} – ${doctor.end_time}`
+                          : doctor.start_time}
+                      </span>
+                    )}
 
                     {/* Status Badge */}
                     {doctor.status === "available" && (
                       <span className="rounded-xl bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-900">
                         {lang === "my"
-                          ? "● ဆေးခန်းထိုင်နေပါသည်"
-                          : "● Available Today"}
+                          ? "● ဆေးခန်းထိုင်နေပါပြီ"
+                          : "● Doctor Arrived"}
+                      </span>
+                    )}
+                    {doctor.status === "not_arrived" && (
+                      <span className="rounded-xl bg-sky-100 px-3 py-1 text-xs font-black text-sky-950">
+                        {lang === "my"
+                          ? "● မရောက်ရှိသေးပါ (ကြိုတင်ဘိုကင်ယူနိုင်သည်)"
+                          : "● Not Arrived Yet (Pre-Booking Open)"}
                       </span>
                     )}
                     {isDelayed && (
@@ -1498,11 +1545,20 @@ export default function PatientPortalPage() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                    <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 px-3.5 py-1.5 text-xs font-black text-emerald-950 sm:text-sm">
-                      {lang === "my"
-                        ? `ယခုပြသနေသော နံပါတ် - #${doctor.current_queue_number}`
-                        : `Now Serving: #${doctor.current_queue_number}`}
-                    </div>
+                    {doctor.status === "not_arrived" ||
+                    doctor.current_queue_number === 0 ? (
+                      <div className="rounded-2xl border-2 border-sky-700 bg-sky-50 px-3.5 py-1.5 text-xs font-black text-sky-950 sm:text-sm">
+                        {lang === "my"
+                          ? "ဆရာဝန်ရောက်လျှင် #1 မှ စတင်ခေါ်ဆိုပါမည်"
+                          : "Queue starts at #1 upon doctor arrival"}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 px-3.5 py-1.5 text-xs font-black text-emerald-950 sm:text-sm">
+                        {lang === "my"
+                          ? `ယခုပြသနေသော နံပါတ် - #${doctor.current_queue_number}`
+                          : `Now Serving: #${doctor.current_queue_number}`}
+                      </div>
+                    )}
                     <div className="rounded-2xl border-2 border-slate-200 bg-slate-100 px-3.5 py-1.5 text-xs font-extrabold text-slate-900 sm:text-sm">
                       {lang === "my"
                         ? `စောင့်ဆိုင်းနေသူ (${waitingCount}) ဦး`

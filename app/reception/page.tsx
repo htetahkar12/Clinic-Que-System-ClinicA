@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useClinic, DoctorFormInput } from "@/lib/clinic-store";
+import {
+  useClinic,
+  DoctorFormInput,
+  SPECIALTY_PRESETS,
+  generateDoctorCode,
+} from "@/lib/clinic-store";
 import { Doctor, DoctorStatus } from "@/lib/types";
 import { MANUAL_TEMPLATES } from "@/lib/messages";
 import { formatCurrency } from "@/lib/utils";
@@ -57,6 +62,8 @@ export default function ReceptionCommandCenterPage() {
     addDoctor,
     updateDoctor,
     removeDoctor,
+    activateSavedDoctorForToday,
+    markDoctorArrivedAndStartQueue,
     updateDoctorSessionStatus,
     sendClinicMessage,
     createWalkInBooking,
@@ -87,20 +94,34 @@ export default function ReceptionCommandCenterPage() {
   const [confirmPinField, setConfirmPinField] = useState("");
   const [passwordModalError, setPasswordModalError] = useState("");
 
-  // 1. Add / Edit Doctor Modal State
+  // 1. Add / Select Saved Doctor / Edit Doctor Modal State
   const [isDoctorModalOpen, setIsDoctorModalOpen] = useState(false);
+  const [doctorModalTab, setDoctorModalTab] = useState<"saved" | "new">(
+    "saved"
+  );
+  const [selectedSavedDoctorId, setSelectedSavedDoctorId] =
+    useState<string>("");
+  const [savedSpecialtyFilter, setSavedSpecialtyFilter] =
+    useState<string>("all");
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
   const [doctorForm, setDoctorForm] = useState<DoctorFormInput>({
+    doctor_code: "CARD-103",
     name: "",
     name_my: "",
     specialty: "",
     specialty_my: "",
-    room_number: "101",
+    room_number: "103",
     consultation_fee: 15000,
-    start_time: "09:00",
-    end_time: "12:00",
+    start_time: "",
+    end_time: "",
     avg_consult_minutes: 10,
   });
+
+  // All Clinic Doctors Directory Modal State
+  const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState(false);
+  const [directorySearch, setDirectorySearch] = useState("");
+  const [directorySpecialtyFilter, setDirectorySpecialtyFilter] =
+    useState("all");
 
   // 2. Doctor Status / Postpone / Delay Modal State
   const [statusModalDoctor, setStatusModalDoctor] = useState<Doctor | null>(
@@ -319,33 +340,103 @@ export default function ReceptionCommandCenterPage() {
     setTimeout(() => setCopiedLinkDoctorId(null), 2500);
   };
 
+  const handleMarkDoctorArrived = async (doctor: Doctor) => {
+    const res = await markDoctorArrivedAndStartQueue(doctor.id);
+    setLastAnnouncement(
+      `${
+        doctor.name_my || doctor.name
+      } ဆေးခန်းသို့ ရောက်ရှိပါပြီ • အလှည့်နံပါတ် #${
+        res.newQueueNumber
+      } မှ စတင်ပြသနေပြီဖြစ်ကြောင်း လူနာများထံ အသိပေးချက် ပေးပို့ပြီးပါပြီ။`
+    );
+  };
+
   const openAddDoctorModal = () => {
     setEditingDoctor(null);
-    setDoctorForm({
-      name: "",
-      name_my: "",
-      specialty: "",
-      specialty_my: "",
-      room_number: "103",
-      consultation_fee: settings.defaultFee || 15000,
-      start_time: "09:00",
-      end_time: "12:00",
-      avg_consult_minutes: 10,
-    });
+    const archivedOrInactive = doctors.filter(
+      (d) => d.is_archived || !d.is_active
+    );
+    const firstSaved = archivedOrInactive[0] || doctors[0];
+    setDoctorModalTab(archivedOrInactive.length > 0 ? "saved" : "new");
+    setSavedSpecialtyFilter("all");
+    if (firstSaved && archivedOrInactive.length > 0) {
+      setSelectedSavedDoctorId(firstSaved.id);
+      setDoctorForm({
+        doctor_code:
+          firstSaved.doctor_code ||
+          generateDoctorCode(
+            `${firstSaved.specialty_my} ${firstSaved.specialty}`,
+            firstSaved.room_number
+          ),
+        name: firstSaved.name,
+        name_my: firstSaved.name_my || firstSaved.name,
+        specialty: firstSaved.specialty,
+        specialty_my: firstSaved.specialty_my || firstSaved.specialty,
+        room_number: firstSaved.room_number,
+        consultation_fee: firstSaved.consultation_fee,
+        start_time: firstSaved.start_time || "",
+        end_time: firstSaved.end_time || "",
+        avg_consult_minutes: firstSaved.avg_consult_minutes || 10,
+      });
+    } else {
+      setSelectedSavedDoctorId("");
+      setDoctorForm({
+        doctor_code: generateDoctorCode("", "103", doctors.length + 1),
+        name: "",
+        name_my: "",
+        specialty: "",
+        specialty_my: "",
+        room_number: "103",
+        consultation_fee: settings.defaultFee || 15000,
+        start_time: "",
+        end_time: "",
+        avg_consult_minutes: 10,
+      });
+    }
     setIsDoctorModalOpen(true);
+  };
+
+  const handleSelectSavedDoctorInModal = (docId: string) => {
+    setSelectedSavedDoctorId(docId);
+    const found = doctors.find((d) => d.id === docId);
+    if (!found) return;
+    setDoctorForm({
+      doctor_code:
+        found.doctor_code ||
+        generateDoctorCode(
+          `${found.specialty_my} ${found.specialty}`,
+          found.room_number
+        ),
+      name: found.name,
+      name_my: found.name_my || found.name,
+      specialty: found.specialty,
+      specialty_my: found.specialty_my || found.specialty,
+      room_number: found.room_number,
+      consultation_fee: found.consultation_fee,
+      start_time: found.start_time || "",
+      end_time: found.end_time || "",
+      avg_consult_minutes: found.avg_consult_minutes || 10,
+    });
   };
 
   const openEditDoctorModal = (doc: Doctor) => {
     setEditingDoctor(doc);
+    setDoctorModalTab("new");
     setDoctorForm({
+      doctor_code:
+        doc.doctor_code ||
+        generateDoctorCode(
+          `${doc.specialty_my} ${doc.specialty}`,
+          doc.room_number
+        ),
       name: doc.name,
       name_my: doc.name_my || doc.name,
       specialty: doc.specialty,
       specialty_my: doc.specialty_my || doc.specialty,
       room_number: doc.room_number,
       consultation_fee: doc.consultation_fee,
-      start_time: doc.start_time,
-      end_time: doc.end_time,
+      start_time: doc.start_time || "",
+      end_time: doc.end_time || "",
       avg_consult_minutes: doc.avg_consult_minutes,
     });
     setIsDoctorModalOpen(true);
@@ -354,8 +445,16 @@ export default function ReceptionCommandCenterPage() {
   const handleSaveDoctorForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!doctorForm.name_my && !doctorForm.name) return;
+    const autoCode =
+      doctorForm.doctor_code?.trim() ||
+      generateDoctorCode(
+        `${doctorForm.specialty_my} ${doctorForm.specialty}`,
+        doctorForm.room_number,
+        doctors.length + 1
+      );
     const payload: DoctorFormInput = {
       ...doctorForm,
+      doctor_code: autoCode,
       name: doctorForm.name || doctorForm.name_my,
       name_my: doctorForm.name_my || doctorForm.name,
       specialty: doctorForm.specialty || doctorForm.specialty_my,
@@ -365,12 +464,17 @@ export default function ReceptionCommandCenterPage() {
     if (editingDoctor) {
       await updateDoctor(editingDoctor.id, payload);
       setLastAnnouncement(
-        `${payload.name_my} ၏ အချက်အလက်များကို ပြင်ဆင်ပြီးပါပြီ။`
+        `[${autoCode}] ${payload.name_my} ၏ အချက်အလက်များကို ပြင်ဆင်ပြီးပါပြီ။`
+      );
+    } else if (doctorModalTab === "saved" && selectedSavedDoctorId) {
+      await activateSavedDoctorForToday(selectedSavedDoctorId, payload);
+      setLastAnnouncement(
+        `[${autoCode}] ${payload.name_my} ကို ယနေ့ ဆေးခန်းထိုင်စာရင်းသို့ ထည့်သွင်းပြီးပါပြီ (ဆရာဝန်ရောက်ရှိမှ #1 စတင်ပြသပါမည်)။`
       );
     } else {
       await addDoctor(payload);
       setLastAnnouncement(
-        `ဆရာဝန်အသစ် (${payload.name_my}) ကို စာရင်းသွင်းပြီးပါပြီ။`
+        `ဆရာဝန်အသစ် [${autoCode}] ${payload.name_my} ကို စာရင်းသွင်းပြီးပါပြီ (ဆရာဝန်ရောက်ရှိမှ #1 စတင်ပြသပါမည်)။`
       );
     }
     setIsDoctorModalOpen(false);
@@ -379,7 +483,9 @@ export default function ReceptionCommandCenterPage() {
   const handleRemoveDoctor = async (doc: Doctor) => {
     await removeDoctor(doc.id);
     setLastAnnouncement(
-      `${doc.name_my || doc.name} ကို စာရင်းမှ ဖယ်ရှားပြီးပါပြီ။`
+      `${
+        doc.name_my || doc.name
+      } ကို ယနေ့စာရင်းမှ ဖယ်ရှားပြီး ဆေးခန်းဆရာဝန်မှတ်တမ်းတွင် သိမ်းဆည်းထားပါသည်။`
     );
   };
 
@@ -569,7 +675,22 @@ export default function ReceptionCommandCenterPage() {
             >
               <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
               <span>
-                {lang === "my" ? "ဆရာဝန်အသစ် ထည့်မည်" : "Add Doctor"}
+                {lang === "my"
+                  ? "ဆရာဝန် ထည့် / ပြန်ရွေးမည်"
+                  : "Add / Select Doctor"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsDirectoryModalOpen(true)}
+              className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-sky-300/40 bg-sky-500/20 px-4 py-2 text-xs font-black text-sky-100 shadow-sm hover:bg-sky-500/30 sm:text-sm"
+            >
+              <Users className="h-4 w-4 text-sky-300 sm:h-5 sm:w-5" />
+              <span>
+                {lang === "my"
+                  ? `ဆရာဝန်အားလုံး စာရင်း (${doctors.length})`
+                  : `All Doctors (${doctors.length})`}
               </span>
             </button>
 
@@ -858,18 +979,36 @@ export default function ReceptionCommandCenterPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
+                      {doctor.doctor_code && (
+                        <span className="rounded-xl bg-indigo-950 px-2.5 py-1 font-mono text-xs font-black text-amber-300">
+                          {doctor.doctor_code}
+                        </span>
+                      )}
                       <span className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-2.5 py-1 text-xs font-black uppercase text-white">
                         <Building2 className="h-3.5 w-3.5" />
                         {lang === "my"
                           ? `အခန်း ${doctor.room_number}`
                           : `Room ${doctor.room_number}`}
                       </span>
-                      <span className="rounded-xl bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-950">
-                        {doctor.start_time} – {doctor.end_time}
-                      </span>
+                      {doctor.start_time && (
+                        <span className="rounded-xl bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-950">
+                          {doctor.end_time
+                            ? `${doctor.start_time} – ${doctor.end_time}`
+                            : doctor.start_time}
+                        </span>
+                      )}
                       {doctor.status === "available" && (
                         <span className="rounded-xl bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-900">
-                          {lang === "my" ? "● ထိုင်နေသည်" : "● Available"}
+                          {lang === "my"
+                            ? "● ရောက်ရှိ / ထိုင်နေပါပြီ"
+                            : "● Arrived & Seeing Patients"}
+                        </span>
+                      )}
+                      {doctor.status === "not_arrived" && (
+                        <span className="rounded-xl bg-sky-100 px-2.5 py-1 text-xs font-black text-sky-950">
+                          {lang === "my"
+                            ? "● မရောက်ရှိသေးပါ (ဘိုကင်လက်ခံနေသည်)"
+                            : "● Not Arrived Yet"}
                         </span>
                       )}
                       {doctor.status === "delayed" && (
@@ -905,14 +1044,26 @@ export default function ReceptionCommandCenterPage() {
 
                   {/* Current Serving Badge + Override Button */}
                   <div className="flex flex-col items-end">
-                    <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 px-3.5 py-2 text-center">
-                      <span className="block text-[10px] font-black uppercase tracking-wider text-emerald-800">
-                        {lang === "my" ? "လက်ရှိအလှည့်" : "Now Serving"}
-                      </span>
-                      <span className="text-3xl font-black text-emerald-950 sm:text-4xl">
-                        #{doctor.current_queue_number}
-                      </span>
-                    </div>
+                    {doctor.status === "not_arrived" ||
+                    doctor.current_queue_number === 0 ? (
+                      <div className="rounded-2xl border-2 border-sky-700 bg-sky-50 px-3.5 py-2 text-center">
+                        <span className="block text-[10px] font-black uppercase tracking-wider text-sky-800">
+                          {lang === "my" ? "လက်ရှိအလှည့်" : "Queue Status"}
+                        </span>
+                        <span className="text-lg font-black text-sky-950 sm:text-xl">
+                          {lang === "my" ? "မစသေးပါ" : "Waiting"}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 px-3.5 py-2 text-center">
+                        <span className="block text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                          {lang === "my" ? "လက်ရှိအလှည့်" : "Now Serving"}
+                        </span>
+                        <span className="text-3xl font-black text-emerald-950 sm:text-4xl">
+                          #{doctor.current_queue_number}
+                        </span>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -933,6 +1084,22 @@ export default function ReceptionCommandCenterPage() {
 
                 {/* Doctor Management Mini-Toolbar */}
                 <div className="mt-4 flex flex-wrap gap-1.5 border-t border-slate-200 pt-3 sm:gap-2">
+                  {(doctor.status === "not_arrived" ||
+                    doctor.current_queue_number === 0) && (
+                    <button
+                      type="button"
+                      onClick={() => handleMarkDoctorArrived(doctor)}
+                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-emerald-700 px-3 py-1.5 text-xs font-black text-white shadow-sm hover:bg-emerald-800"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>
+                        {lang === "my"
+                          ? "ဆရာဝန် ရောက်ပါပြီ (#1 စမည်)"
+                          : "Doctor Arrived (Start #1)"}
+                      </span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => openStatusModal(doctor)}
@@ -941,8 +1108,8 @@ export default function ReceptionCommandCenterPage() {
                     <CalendarClock className="h-3.5 w-3.5" />
                     <span>
                       {lang === "my"
-                        ? "အချိန်ရွှေ့ / နောက်ကျ"
-                        : "Delay / Postpone"}
+                        ? "အချိန်ရွှေ့ / အခြေအနေ"
+                        : "Status / Postpone"}
                     </span>
                   </button>
 
@@ -1169,30 +1336,46 @@ export default function ReceptionCommandCenterPage() {
                 )}
               </div>
 
-              {/* Call Next Patient Primary Button */}
+              {/* Call Next Patient or Mark Doctor Arrived Primary Button */}
               <div className="border-t-2 border-slate-100 bg-slate-50 p-4">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleAdvanceQueue(
-                      doctor.id,
-                      (lang === "my" ? doctor.name_my : doctor.name) ||
-                        doctor.name
-                    )
-                  }
-                  className="flex min-h-[58px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-5 py-3.5 text-base font-black text-white shadow-md transition-all hover:opacity-95 active:scale-[0.99] sm:text-lg"
-                >
-                  <Users className="h-6 w-6 shrink-0" />
-                  <span>
-                    {lang === "my"
-                      ? `နောက်လူနာ ခေါ်မည် (#${
-                          doctor.current_queue_number + 1
-                        })`
-                      : `Call Next Patient (#${
-                          doctor.current_queue_number + 1
-                        })`}
-                  </span>
-                </button>
+                {doctor.status === "not_arrived" ||
+                doctor.current_queue_number === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => handleMarkDoctorArrived(doctor)}
+                    className="flex min-h-[58px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-800 px-5 py-3.5 text-base font-black text-white shadow-md transition-all hover:opacity-95 active:scale-[0.99] sm:text-lg"
+                  >
+                    <CheckCircle2 className="h-6 w-6 shrink-0" />
+                    <span>
+                      {lang === "my"
+                        ? "ဆရာဝန် ရောက်ရှိပါပြီ — #1 စတင်ခေါ်ဆိုမည်"
+                        : "Doctor Arrived — Start Queue at #1"}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleAdvanceQueue(
+                        doctor.id,
+                        (lang === "my" ? doctor.name_my : doctor.name) ||
+                          doctor.name
+                      )
+                    }
+                    className="flex min-h-[58px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-5 py-3.5 text-base font-black text-white shadow-md transition-all hover:opacity-95 active:scale-[0.99] sm:text-lg"
+                  >
+                    <Users className="h-6 w-6 shrink-0" />
+                    <span>
+                      {lang === "my"
+                        ? `နောက်လူနာ ခေါ်မည် (#${
+                            doctor.current_queue_number + 1
+                          })`
+                        : `Call Next Patient (#${
+                            doctor.current_queue_number + 1
+                          })`}
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -1495,21 +1678,28 @@ export default function ReceptionCommandCenterPage() {
       )}
 
       {/* =====================================================================
-          MODAL 1: ADD / EDIT DOCTOR MODAL
+          MODAL 1: ADD / SELECT SAVED DOCTOR / EDIT DOCTOR MODAL (WITH AUTO CODE)
       ===================================================================== */}
       {isDoctorModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4">
           <div className="safe-modal-panel rounded-3xl border-2 border-slate-300 bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-black text-slate-950">
-                {editingDoctor
-                  ? lang === "my"
-                    ? "ဆရာဝန် အချက်အလက် ပြင်ဆင်ရန်"
-                    : "Edit Doctor Details"
-                  : lang === "my"
-                  ? "ဆရာဝန်အသစ် ထည့်သွင်းရန်"
-                  : "Add New Doctor"}
-              </h3>
+              <div>
+                <h3 className="text-xl font-black text-slate-950">
+                  {editingDoctor
+                    ? lang === "my"
+                      ? "ဆရာဝန် အချက်အလက် ပြင်ဆင်ရန်"
+                      : "Edit Doctor Details"
+                    : lang === "my"
+                    ? "ဆရာဝန် ထည့်သွင်းရန် / ထိုင်ခဲ့ဖူးသော ဆရာဝန် ပြန်ရွေးရန်"
+                    : "Select Saved Doctor or Register New Doctor"}
+                </h3>
+                <p className="mt-0.5 text-xs font-bold text-slate-600">
+                  {lang === "my"
+                    ? "ဆရာဝန်ကို ထည့်သွင်းရုံဖြင့် ထိုင်နေသည်ဟု မပြသေးပါ။ ဆရာဝန်ရောက်ရှိမှ #1 စတင်ပြသပါမည်။"
+                    : "Adding a doctor keeps status as 'Not Arrived' until you mark them arrived (#1)."}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsDoctorModalOpen(false)}
@@ -1519,70 +1709,304 @@ export default function ReceptionCommandCenterPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveDoctorForm} className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                  ဆရာဝန်အမည် (မြန်မာဘာသာဖြင့်) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={doctorForm.name_my}
-                  onChange={(e) =>
-                    setDoctorForm({ ...doctorForm, name_my: e.target.value })
-                  }
-                  placeholder="ဥပမာ - ဒေါက်တာ အောင်ကျော်မိုး"
-                  className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                  Doctor Name (English)
-                </label>
-                <input
-                  type="text"
-                  value={doctorForm.name}
-                  onChange={(e) =>
-                    setDoctorForm({ ...doctorForm, name: e.target.value })
-                  }
-                  placeholder="e.g., Dr. Aung Kyaw Moe"
-                  className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                  အထူးကု ဘာသာရပ် (မြန်မာဘာသာဖြင့်) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={doctorForm.specialty_my}
-                  onChange={(e) =>
+            {/* Tabs when adding a doctor: Saved Doctors vs New Doctor */}
+            {!editingDoctor && (
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDoctorModalTab("saved");
+                    const savedPool = doctors.filter(
+                      (d) => d.is_archived || !d.is_active
+                    );
+                    const pick = savedPool[0] || doctors[0];
+                    if (pick) handleSelectSavedDoctorInModal(pick.id);
+                  }}
+                  className={`min-h-[44px] rounded-xl border-2 text-xs font-black sm:text-sm ${
+                    doctorModalTab === "saved"
+                      ? "border-blue-700 bg-blue-700 text-white"
+                      : "border-slate-300 bg-slate-50 text-slate-800"
+                  }`}
+                >
+                  {lang === "my"
+                    ? "ထိုင်ခဲ့ဖူးသော ဆရာဝန်များမှ ရွေးရန်"
+                    : "Select Saved / Past Doctor"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDoctorModalTab("new");
+                    setSelectedSavedDoctorId("");
                     setDoctorForm({
-                      ...doctorForm,
-                      specialty_my: e.target.value,
-                    })
-                  }
-                  placeholder="ဥပမာ - နှလုံးနှင့် သွေးတိုး အထူးကုဆရာဝန်ကြီး"
-                  className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                />
+                      doctor_code: generateDoctorCode(
+                        "နှလုံး",
+                        "103",
+                        doctors.length + 1
+                      ),
+                      name: "",
+                      name_my: "",
+                      specialty: SPECIALTY_PRESETS[0].specialty_en,
+                      specialty_my: SPECIALTY_PRESETS[0].specialty_my,
+                      room_number: "103",
+                      consultation_fee: settings.defaultFee || 15000,
+                      start_time: "",
+                      end_time: "",
+                      avg_consult_minutes: 10,
+                    });
+                  }}
+                  className={`min-h-[44px] rounded-xl border-2 text-xs font-black sm:text-sm ${
+                    doctorModalTab === "new"
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-slate-300 bg-slate-50 text-slate-800"
+                  }`}
+                >
+                  {lang === "my"
+                    ? "+ ဆရာဝန်အသစ် စာရင်းသွင်းရန်"
+                    : "+ Register New Doctor"}
+                </button>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveDoctorForm} className="space-y-4">
+              {/* Saved Doctor Picker (by Specialty & Name -> Auto Code) */}
+              {!editingDoctor && doctorModalTab === "saved" && (
+                <div className="space-y-3 rounded-2xl border-2 border-blue-200 bg-blue-50/60 p-4">
+                  <div>
+                    <label className="mb-1 block text-xs font-extrabold uppercase text-blue-950">
+                      {lang === "my"
+                        ? "၁။ အထူးကုဘာသာရပ်ဖြင့် စစ်ထုတ်ရန် (Filter by Specialty)"
+                        : "1. Filter by Specialty"}
+                    </label>
+                    <select
+                      value={savedSpecialtyFilter}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSavedSpecialtyFilter(val);
+                        const matching = doctors.filter((d) =>
+                          val === "all"
+                            ? true
+                            : (d.specialty_my || "").includes(val) ||
+                              (d.specialty || "")
+                                .toLowerCase()
+                                .includes(val.toLowerCase()) ||
+                              (d.doctor_code || "").startsWith(val)
+                        );
+                        if (matching[0]) {
+                          handleSelectSavedDoctorInModal(matching[0].id);
+                        }
+                      }}
+                      className="min-h-[44px] w-full rounded-xl border-2 border-blue-300 bg-white px-3 text-sm font-bold text-slate-950"
+                    >
+                      <option value="all">
+                        {lang === "my"
+                          ? "အထူးကု ဘာသာရပ် အားလုံး (All Specialties)"
+                          : "All Specialties"}
+                      </option>
+                      {SPECIALTY_PRESETS.map((sp) => (
+                        <option key={sp.codePrefix} value={sp.codePrefix}>
+                          [{sp.codePrefix}] {sp.specialty_my}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-extrabold uppercase text-blue-950">
+                      {lang === "my"
+                        ? "၂။ ထိုင်ခဲ့ဖူးသော ဆရာဝန်အမည်နှင့် အထူးကု ရွေးချယ်ပါ *"
+                        : "2. Select Saved Doctor (Name & Specialty) *"}
+                    </label>
+                    <select
+                      value={selectedSavedDoctorId}
+                      onChange={(e) =>
+                        handleSelectSavedDoctorInModal(e.target.value)
+                      }
+                      className="min-h-[48px] w-full rounded-xl border-2 border-slate-900 bg-white px-3 text-sm font-black text-slate-950"
+                    >
+                      {doctors
+                        .filter((d) =>
+                          savedSpecialtyFilter === "all"
+                            ? true
+                            : (d.doctor_code || "").startsWith(
+                                savedSpecialtyFilter
+                              ) ||
+                              (d.specialty_my || "").includes(
+                                savedSpecialtyFilter
+                              )
+                        )
+                        .map((doc) => (
+                          <option key={doc.id} value={doc.id}>
+                            [{doc.doctor_code || "DR"}] {doc.name_my || doc.name}{" "}
+                            — {doc.specialty_my || doc.specialty}{" "}
+                            {doc.is_archived
+                              ? "(မှတ်တမ်းရှိပြီး)"
+                              : "(ယနေ့စာရင်းဝင်)"}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Prominent Auto-Generated Doctor Code Banner */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-indigo-900 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-3.5 text-white">
+                <div>
+                  <span className="block text-[11px] font-extrabold uppercase tracking-wider text-sky-300">
+                    {lang === "my"
+                      ? "ဆရာဝန် ကုဒ်နံပါတ် (Auto Doctor Code)"
+                      : "Doctor Code"}
+                  </span>
+                  <span className="font-mono text-2xl font-black text-amber-300">
+                    {doctorForm.doctor_code ||
+                      generateDoctorCode(
+                        `${doctorForm.specialty_my} ${doctorForm.specialty}`,
+                        doctorForm.room_number,
+                        doctors.length + 1
+                      )}
+                  </span>
+                </div>
+                <div className="w-36">
+                  <label className="mb-1 block text-[11px] font-bold text-slate-300">
+                    {lang === "my" ? "ကုဒ်ပြင်လိုပါက" : "Custom Code"}
+                  </label>
+                  <input
+                    type="text"
+                    value={doctorForm.doctor_code || ""}
+                    onChange={(e) =>
+                      setDoctorForm({
+                        ...doctorForm,
+                        doctor_code: e.target.value.toUpperCase(),
+                      })
+                    }
+                    className="min-h-[38px] w-full rounded-xl border border-white/30 bg-white/10 px-2.5 font-mono text-sm font-black uppercase text-white"
+                  />
+                </div>
               </div>
 
+              {/* Quick Specialty Preset Selector (auto-updates Specialty + Doctor Code!) */}
               <div>
-                <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                  Specialty (English)
+                <label className="mb-1 block text-xs font-extrabold uppercase text-slate-700">
+                  {lang === "my"
+                    ? "အထူးကု ဘာသာရပ် အမြန်ရွေးချယ်ရန် (နှိပ်လိုက်သည်နှင့် Code အလိုအလျောက် ပေါ်ပါမည်)"
+                    : "Quick Specialty Selector (Auto-Generates Code)"}
                 </label>
-                <input
-                  type="text"
-                  value={doctorForm.specialty}
-                  onChange={(e) =>
-                    setDoctorForm({ ...doctorForm, specialty: e.target.value })
-                  }
-                  placeholder="e.g., Senior Cardiologist"
-                  className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                />
+                <div className="flex flex-wrap gap-1.5">
+                  {SPECIALTY_PRESETS.map((preset) => {
+                    const isSelected =
+                      doctorForm.specialty_my === preset.specialty_my;
+                    return (
+                      <button
+                        key={preset.codePrefix}
+                        type="button"
+                        onClick={() => {
+                          const nextRoom =
+                            doctorForm.room_number || preset.defaultRoom;
+                          const nextCode = `${preset.codePrefix}-${nextRoom}`;
+                          setDoctorForm({
+                            ...doctorForm,
+                            specialty_my: preset.specialty_my,
+                            specialty: preset.specialty_en,
+                            doctor_code: nextCode,
+                            consultation_fee:
+                              doctorForm.consultation_fee || preset.defaultFee,
+                          });
+                        }}
+                        className={`rounded-xl border px-2.5 py-1 text-xs font-black transition-all ${
+                          isSelected
+                            ? "border-indigo-900 bg-indigo-900 text-amber-300 shadow-sm"
+                            : "border-slate-300 bg-slate-50 text-slate-800 hover:bg-slate-100"
+                        }`}
+                      >
+                        [{preset.codePrefix}]{" "}
+                        {preset.specialty_my.split(" ")[0]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                    ဆရာဝန်အမည် (မြန်မာဘာသာဖြင့်) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={doctorForm.name_my}
+                    onChange={(e) =>
+                      setDoctorForm({ ...doctorForm, name_my: e.target.value })
+                    }
+                    placeholder="ဥပမာ - ဒေါက်တာ အောင်ကျော်မိုး"
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                    Doctor Name (English)
+                  </label>
+                  <input
+                    type="text"
+                    value={doctorForm.name}
+                    onChange={(e) =>
+                      setDoctorForm({ ...doctorForm, name: e.target.value })
+                    }
+                    placeholder="e.g., Dr. Aung Kyaw Moe"
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                    အထူးကု ဘာသာရပ် (မြန်မာဘာသာဖြင့်) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={doctorForm.specialty_my}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDoctorForm({
+                        ...doctorForm,
+                        specialty_my: val,
+                        doctor_code: generateDoctorCode(
+                          `${val} ${doctorForm.specialty}`,
+                          doctorForm.room_number,
+                          doctors.length + 1
+                        ),
+                      });
+                    }}
+                    placeholder="ဥပမာ - နှလုံးနှင့် သွေးတိုး အထူးကုဆရာဝန်ကြီး"
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                    Specialty (English)
+                  </label>
+                  <input
+                    type="text"
+                    value={doctorForm.specialty}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDoctorForm({
+                        ...doctorForm,
+                        specialty: val,
+                        doctor_code: generateDoctorCode(
+                          `${doctorForm.specialty_my} ${val}`,
+                          doctorForm.room_number,
+                          doctors.length + 1
+                        ),
+                      });
+                    }}
+                    placeholder="e.g., Senior Cardiologist"
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1594,12 +2018,18 @@ export default function ReceptionCommandCenterPage() {
                     type="text"
                     required
                     value={doctorForm.room_number}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const rm = e.target.value;
                       setDoctorForm({
                         ...doctorForm,
-                        room_number: e.target.value,
-                      })
-                    }
+                        room_number: rm,
+                        doctor_code: generateDoctorCode(
+                          `${doctorForm.specialty_my} ${doctorForm.specialty}`,
+                          rm,
+                          doctors.length + 1
+                        ),
+                      });
+                    }}
                     className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
                   />
                 </div>
@@ -1625,8 +2055,8 @@ export default function ReceptionCommandCenterPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                    စတင်ချိန် (Start Time)
+                  <label className="mb-1 block text-xs font-extrabold text-slate-700">
+                    စတင်ချိန် (Optional - လိုသလိုထည့်နိုင်သည်)
                   </label>
                   <input
                     type="text"
@@ -1637,13 +2067,13 @@ export default function ReceptionCommandCenterPage() {
                         start_time: e.target.value,
                       })
                     }
-                    placeholder="09:00"
-                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                    placeholder="ဥပမာ - 09:00 (မထည့်လည်းရသည်)"
+                    className="min-h-[44px] w-full rounded-xl border-2 border-slate-300 px-3.5 text-sm font-bold"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                    ပြီးဆုံးချိန် (End Time)
+                  <label className="mb-1 block text-xs font-extrabold text-slate-700">
+                    ပြီးဆုံးချိန် (Optional - လိုသလိုထည့်နိုင်သည်)
                   </label>
                   <input
                     type="text"
@@ -1651,8 +2081,8 @@ export default function ReceptionCommandCenterPage() {
                     onChange={(e) =>
                       setDoctorForm({ ...doctorForm, end_time: e.target.value })
                     }
-                    placeholder="12:00"
-                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                    placeholder="ဥပမာ - 12:00 (မထည့်လည်းရသည်)"
+                    className="min-h-[44px] w-full rounded-xl border-2 border-slate-300 px-3.5 text-sm font-bold"
                   />
                 </div>
               </div>
@@ -1669,10 +2099,214 @@ export default function ReceptionCommandCenterPage() {
                   type="submit"
                   className="min-h-[52px] flex-1 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-800 font-black text-white shadow-md"
                 >
-                  သိမ်းဆည်းမည်
+                  {editingDoctor
+                    ? "သိမ်းဆည်းမည်"
+                    : "ယနေ့စာရင်းသို့ ထည့်သွင်းမည်"}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 1B: ALL CLINIC DOCTORS DIRECTORY MODAL (ACTIVE & PAST DOCTORS)
+      ===================================================================== */}
+      {isDirectoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4">
+          <div className="safe-modal-panel max-w-4xl rounded-3xl border-2 border-slate-300 bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-black text-slate-950 sm:text-2xl">
+                  {lang === "my"
+                    ? `ဆေးခန်းရှိ ဆရာဝန်အားလုံး စာရင်း (${doctors.length} ဦး)`
+                    : `All Registered Clinic Doctors (${doctors.length})`}
+                </h3>
+                <p className="text-xs font-bold text-slate-600 sm:text-sm">
+                  {lang === "my"
+                    ? "ယနေ့ ထိုင်မည့် ဆရာဝန်များနှင့် ယခင် ထိုင်ခဲ့ဖူးသော ဆရာဝန်အားလုံးကို ကုဒ် (Code)၊ အမည်၊ အထူးကုအလိုက် ကြည့်ရှုပြီး ယနေ့စာရင်းသို့ တိုက်ရိုက် ထည့်သွင်းနိုင်ပါသည်။"
+                    : "View all active and past doctors by Doctor Code, Name, and Specialty."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDirectoryModalOpen(false)}
+                className="rounded-xl p-1 text-slate-500 hover:bg-slate-100"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Search & Specialty Filter Bar */}
+            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input
+                type="text"
+                value={directorySearch}
+                onChange={(e) => setDirectorySearch(e.target.value)}
+                placeholder={
+                  lang === "my"
+                    ? "ဆရာဝန်အမည်၊ ကုဒ် (ဥပမာ CARD-101) သို့မဟုတ် အထူးကု ရှာရန်..."
+                    : "Search by Doctor Name, Code, or Specialty..."
+                }
+                className="min-h-[46px] w-full rounded-xl border-2 border-slate-300 px-3.5 text-sm font-bold"
+              />
+              <select
+                value={directorySpecialtyFilter}
+                onChange={(e) => setDirectorySpecialtyFilter(e.target.value)}
+                className="min-h-[46px] w-full rounded-xl border-2 border-slate-300 bg-white px-3.5 text-sm font-bold"
+              >
+                <option value="all">
+                  {lang === "my"
+                    ? "အထူးကု ဘာသာရပ် အားလုံး (All Specialties)"
+                    : "All Specialties"}
+                </option>
+                {SPECIALTY_PRESETS.map((sp) => (
+                  <option key={sp.codePrefix} value={sp.codePrefix}>
+                    [{sp.codePrefix}] {sp.specialty_my}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* All Doctors List */}
+            <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
+              {doctors
+                .filter((d) => {
+                  const q = directorySearch.trim().toLowerCase();
+                  const matchesSearch =
+                    !q ||
+                    (d.name || "").toLowerCase().includes(q) ||
+                    (d.name_my || "").toLowerCase().includes(q) ||
+                    (d.specialty || "").toLowerCase().includes(q) ||
+                    (d.specialty_my || "").toLowerCase().includes(q) ||
+                    (d.doctor_code || "").toLowerCase().includes(q);
+                  const matchesSpec =
+                    directorySpecialtyFilter === "all" ||
+                    (d.doctor_code || "").startsWith(
+                      directorySpecialtyFilter
+                    ) ||
+                    (d.specialty_my || "").includes(directorySpecialtyFilter);
+                  return matchesSearch && matchesSpec;
+                })
+                .map((doc) => {
+                  const isTodayActive = !doc.is_archived && doc.is_active;
+                  return (
+                    <div
+                      key={doc.id}
+                      className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-4 sm:flex-row sm:items-center ${
+                        isTodayActive
+                          ? "border-emerald-600 bg-emerald-50/40"
+                          : "border-slate-200 bg-slate-50"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-lg bg-indigo-950 px-2.5 py-0.5 font-mono text-xs font-black text-amber-300">
+                            {doc.doctor_code || "DR-100"}
+                          </span>
+                          <span className="rounded-lg bg-slate-900 px-2.5 py-0.5 text-xs font-black text-white">
+                            အခန်း {doc.room_number}
+                          </span>
+                          {isTodayActive ? (
+                            <span className="rounded-lg bg-emerald-700 px-2.5 py-0.5 text-xs font-black text-white">
+                              {doc.status === "available"
+                                ? `ယနေ့ ထိုင်နေသည် (#${doc.current_queue_number})`
+                                : "ယနေ့စာရင်းဝင် (မရောက်သေးပါ)"}
+                            </span>
+                          ) : (
+                            <span className="rounded-lg bg-slate-300 px-2.5 py-0.5 text-xs font-black text-slate-800">
+                              ယခင် ထိုင်ခဲ့ဖူးသော ဆရာဝန် (Saved)
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-base font-black text-slate-950 sm:text-lg">
+                          {doc.name_my || doc.name}{" "}
+                          <span className="text-sm font-bold text-slate-600">
+                            ({doc.name})
+                          </span>
+                        </h4>
+                        <p className="text-xs font-bold text-clinic-primary sm:text-sm">
+                          {doc.specialty_my || doc.specialty} •{" "}
+                          {formatCurrency(doc.consultation_fee, lang)}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!isTodayActive ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await activateSavedDoctorForToday(doc.id);
+                              setLastAnnouncement(
+                                `[${doc.doctor_code}] ${
+                                  doc.name_my || doc.name
+                                } ကို ယနေ့ ဆေးခန်းထိုင်စာရင်းသို့ ထည့်သွင်းပြီးပါပြီ (ဆရာဝန်ရောက်ရှိမှ #1 စတင်ပြသပါမည်)။`
+                              );
+                            }}
+                            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-blue-700 px-3.5 py-2 text-xs font-black text-white shadow-sm hover:bg-blue-800"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>ယနေ့စာရင်းသို့ ထည့်မည်</span>
+                          </button>
+                        ) : (
+                          <>
+                            {(doc.status === "not_arrived" ||
+                              doc.current_queue_number === 0) && (
+                              <button
+                                type="button"
+                                onClick={() => handleMarkDoctorArrived(doc)}
+                                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-emerald-700 px-3 py-2 text-xs font-black text-white hover:bg-emerald-800"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                                <span>ရောက်ပါပြီ (#1 စမည်)</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveDoctor(doc)}
+                              className="inline-flex min-h-[40px] items-center gap-1 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-xs font-black text-red-800 hover:bg-red-100"
+                            >
+                              <span>ယနေ့စာရင်းမှ ဖယ်ထားမည်</span>
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDirectoryModalOpen(false);
+                            openEditDoctorModal(doc);
+                          }}
+                          className="inline-flex min-h-[40px] items-center gap-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-800 hover:bg-slate-100"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                          <span>ပြင်မည်</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3 border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDirectoryModalOpen(false);
+                  openAddDoctorModal();
+                }}
+                className="inline-flex min-h-[46px] items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-black text-white"
+              >
+                <Plus className="h-4 w-4" />
+                <span>ဆရာဝန်အသစ် ထပ်ထည့်မည်</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsDirectoryModalOpen(false)}
+                className="min-h-[46px] rounded-xl border-2 border-slate-300 px-5 text-sm font-black text-slate-800"
+              >
+                ပိတ်မည်
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1692,10 +2326,11 @@ export default function ReceptionCommandCenterPage() {
             </p>
 
             <form onSubmit={handleSaveDoctorStatus} className="mt-4 space-y-4">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(
                   [
-                    { id: "available", label: "ထိုင်နေသည်" },
+                    { id: "not_arrived", label: "မရောက်သေးပါ" },
+                    { id: "available", label: "ရောက်ပြီ (#1 စမည်)" },
                     { id: "delayed", label: "နောက်ကျမည်" },
                     { id: "postponed", label: "ရက်ရွှေ့ဆိုင်း" },
                   ] as const
@@ -1704,7 +2339,7 @@ export default function ReceptionCommandCenterPage() {
                     key={opt.id}
                     type="button"
                     onClick={() => setStatusChoice(opt.id)}
-                    className={`min-h-[48px] rounded-xl border-2 text-sm font-black ${
+                    className={`min-h-[48px] rounded-xl border-2 text-xs font-black sm:text-sm ${
                       statusChoice === opt.id
                         ? "border-blue-700 bg-blue-700 text-white"
                         : "border-slate-300 bg-white text-slate-800"

@@ -4,6 +4,7 @@ import "./globals.css";
 import { CLINIC_NAME, PRIMARY_COLOR } from "@/clinic.config";
 import { ClinicProvider } from "@/lib/clinic-store";
 import { ClinicHeader } from "@/components/clinic-header";
+import { DevPortalSwitcher } from "@/components/dev-portal-switcher";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -41,6 +42,7 @@ export default function RootLayout({
         <ClinicProvider>
           <ClinicHeader />
           <main className="flex-1">{children}</main>
+          <DevPortalSwitcher />
         </ClinicProvider>
       </body>
     </html>

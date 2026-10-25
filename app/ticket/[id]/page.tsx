@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
-import { CLINIC_NAME, CLINIC_NAME_MY } from "@/clinic.config";
 import { useClinic } from "@/lib/clinic-store";
 import {
   QrCode,
@@ -21,7 +20,7 @@ import {
 export default function TicketPage() {
   const params = useParams<{ id: string }>();
   const bookingId = params?.id;
-  const { lang, bookings, doctors, patients } = useClinic();
+  const { lang, settings, bookings, doctors, patients } = useClinic();
 
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -132,7 +131,7 @@ export default function TicketPage() {
         {/* Top Royal Gradient Header */}
         <div className="bg-gradient-to-br from-blue-700 via-indigo-800 to-slate-900 p-6 text-center text-white">
           <p className="text-xs font-extrabold uppercase tracking-widest text-sky-300">
-            {lang === "my" ? CLINIC_NAME_MY : CLINIC_NAME}
+            {lang === "my" ? settings.clinicNameMy : settings.clinicName}
           </p>
           <h1 className="mt-1 text-2xl font-black">
             {lang === "my"

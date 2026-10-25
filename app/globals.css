@@ -24,19 +24,61 @@
     --input: 214.3 31.8% 75%;
     --ring: 216 90% 44%;
     --radius: 1rem;
+    --clinic-primary: #0B5ED7;
+    --clinic-secondary: #0F172A;
   }
 }
 
 @layer base {
-  * {
+  *,
+  *::before,
+  *::after {
     @apply border-border;
+    box-sizing: border-box;
   }
+
   html {
     font-size: 16px;
     -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
   }
+
+  /* Compact phones (<350px width) scale slightly so cards never overflow */
+  html[data-device="compact-phone"] {
+    font-size: 15px;
+  }
+
   body {
     @apply bg-slate-50 text-slate-950 antialiased selection:bg-clinic-primary selection:text-white;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    min-height: 100dvh;
+    overflow-x: clip;
+    line-height: 1.65;
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
+}
+
+/* Responsive Queue Display Numbers that adapt to Portrait & Landscape */
+.queue-number-fluid {
+  font-size: clamp(3.25rem, 10vw, 5.5rem);
+  line-height: 1.05;
+}
+
+/* When a phone is rotated into short landscape mode, keep cards & modals compact */
+html[data-short-landscape="true"] .queue-number-fluid {
+  font-size: clamp(2.5rem, 7vw, 3.75rem);
+}
+
+html[data-short-landscape="true"] .dialpad-btn {
+  min-height: 46px !important;
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+}
+
+.safe-modal-panel {
+  max-height: min(90dvh, calc(100vh - 2rem));
+  width: min(100%, 34rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }

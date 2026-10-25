@@ -18,17 +18,26 @@ import {
   PaymentMethod,
   Lang,
   DoctorStatus,
+  ClinicSettings,
 } from "@/lib/types";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { showLocalNotification } from "@/lib/firebase";
-import { CLINIC_CONFIG, DEFAULT_LANGUAGE } from "@/clinic.config";
+import {
+  CLINIC_CONFIG,
+  CLINIC_NAME,
+  CLINIC_NAME_MY,
+  PRIMARY_COLOR,
+  SECONDARY_COLOR,
+  LOGO_URL,
+  DEFAULT_LANGUAGE,
+} from "@/clinic.config";
 import { clinicToday } from "@/lib/date";
 import { templates } from "@/lib/messages";
+import { useDeviceViewport, DeviceViewportInfo } from "@/lib/use-device-viewport";
 
-const STORAGE_KEY = "auracare_clinic_state_v2";
-const PATIENT_SESSION_KEY = "auracare_current_patient_id_v2";
-const LANG_STORAGE_KEY = "auracare_lang_v2";
-const CHANNEL_NAME = "auracare_realtime_channel_v2";
+const STORAGE_KEY = "auracare_clinic_state_v3";
+const PATIENT_SESSION_KEY = "auracare_current_patient_id_v3";
+const LANG_STORAGE_KEY = "auracare_lang_v3";
+const CHANNEL_NAME = "auracare_realtime_channel_v3";
 
 const SAMPLE_RECEIPT_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="480" height="640" viewBox="0 0 480 640">
@@ -52,7 +61,7 @@ const SAMPLE_RECEIPT_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
   <text x="56" y="405" fill="#475569" font-family="sans-serif" font-size="16">Transaction ID</text>
   <text x="424" y="405" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">KPAY-20261025-88392</text>
   <text x="56" y="455" fill="#475569" font-family="sans-serif" font-size="16">Clinic Account</text>
-  <text x="424" y="455" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">09-777-888-999</text>
+  <text x="424" y="455" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">09777888999</text>
   <text x="56" y="505" fill="#475569" font-family="sans-serif" font-size="16">Purpose</text>
   <text x="424" y="505" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">Clinic Queue Booking</text>
 </svg>
@@ -60,7 +69,43 @@ const SAMPLE_RECEIPT_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
 
 const TODAY_STR = clinicToday();
 
-const INITIAL_DOCTORS: Doctor[] = [
+export const INITIAL_SETTINGS: ClinicSettings = {
+  clinicName: CLINIC_NAME,
+  clinicNameMy: CLINIC_NAME_MY,
+  subtitleEn: "Pre-Paid Poly Clinic Queue & Appointment System",
+  subtitleMy: "ကြိုတင်ဘိုကင်နှင့် တိုက်ရိုက် အလှည့်ကြည့် အထူးကုဆေးခန်းစနစ်",
+  logoUrl: LOGO_URL,
+  primaryColor: PRIMARY_COLOR,
+  secondaryColor: SECONDARY_COLOR,
+  defaultFee: CLINIC_CONFIG.defaultConsultationFee,
+  clinicPhone: CLINIC_CONFIG.supportPhone,
+  addressMy: CLINIC_CONFIG.addressMy,
+  addressEn: CLINIC_CONFIG.address,
+  receptionPin: "1234",
+  superAdminPin: "1234",
+  paymentAccounts: {
+    kpay: {
+      provider: CLINIC_CONFIG.paymentAccounts.kpay.provider,
+      accountName: CLINIC_CONFIG.paymentAccounts.kpay.accountName,
+      accountNumber: CLINIC_CONFIG.paymentAccounts.kpay.accountNumber,
+      color: CLINIC_CONFIG.paymentAccounts.kpay.color,
+    },
+    wavepay: {
+      provider: CLINIC_CONFIG.paymentAccounts.wavepay.provider,
+      accountName: CLINIC_CONFIG.paymentAccounts.wavepay.accountName,
+      accountNumber: CLINIC_CONFIG.paymentAccounts.wavepay.accountNumber,
+      color: CLINIC_CONFIG.paymentAccounts.wavepay.color,
+    },
+    ayapay: {
+      provider: CLINIC_CONFIG.paymentAccounts.ayapay.provider,
+      accountName: CLINIC_CONFIG.paymentAccounts.ayapay.accountName,
+      accountNumber: CLINIC_CONFIG.paymentAccounts.ayapay.accountNumber,
+      color: CLINIC_CONFIG.paymentAccounts.ayapay.color,
+    },
+  },
+};
+
+export const INITIAL_DOCTORS: Doctor[] = [
   {
     id: "11111111-1111-4111-8111-111111111101",
     name: "Dr. Aung Kyaw Moe",
@@ -155,7 +200,7 @@ const INITIAL_DOCTORS: Doctor[] = [
   },
 ];
 
-const INITIAL_PATIENTS: Patient[] = [
+export const INITIAL_PATIENTS: Patient[] = [
   {
     id: "22222222-2222-4222-8222-222222222201",
     phone: "095123456",
@@ -190,7 +235,7 @@ const INITIAL_PATIENTS: Patient[] = [
   },
 ];
 
-const INITIAL_BOOKINGS: Booking[] = [
+export const INITIAL_BOOKINGS: Booking[] = [
   {
     id: "33333333-3333-4333-8333-333333333301",
     patient_id: "22222222-2222-4222-8222-222222222202",
@@ -199,7 +244,7 @@ const INITIAL_BOOKINGS: Booking[] = [
     queue_number: 3,
     status: "in_progress",
     payment_status: "paid",
-    ticket_code: "AC-103",
+    ticket_code: "AC-101-3",
     source: "online",
     is_priority: false,
     checked_in_at: new Date(Date.now() - 40 * 60000).toISOString(),
@@ -216,7 +261,7 @@ const INITIAL_BOOKINGS: Booking[] = [
     queue_number: 4,
     status: "waiting",
     payment_status: "pending",
-    ticket_code: "AC-104",
+    ticket_code: "AC-101-4",
     source: "online",
     is_priority: false,
     checked_in_at: null,
@@ -233,7 +278,7 @@ const INITIAL_BOOKINGS: Booking[] = [
     queue_number: 5,
     status: "waiting",
     payment_status: "paid",
-    ticket_code: "AC-105",
+    ticket_code: "AC-101-5",
     source: "online",
     is_priority: false,
     checked_in_at: null,
@@ -244,7 +289,7 @@ const INITIAL_BOOKINGS: Booking[] = [
   },
 ];
 
-const INITIAL_TRANSACTIONS: Transaction[] = [
+export const INITIAL_TRANSACTIONS: Transaction[] = [
   {
     id: "44444444-4444-4444-8444-444444444401",
     patient_id: "22222222-2222-4222-8222-222222222203",
@@ -267,7 +312,7 @@ const INITIAL_TRANSACTIONS: Transaction[] = [
   },
 ];
 
-const INITIAL_MESSAGES: ClinicMessage[] = [
+export const INITIAL_MESSAGES: ClinicMessage[] = [
   {
     id: "55555555-5555-4555-8555-555555555501",
     doctor_id: "11111111-1111-4111-8111-111111111101",
@@ -276,15 +321,19 @@ const INITIAL_MESSAGES: ClinicMessage[] = [
     kind: "automated",
     category: "available",
     title_en: "Doctor has arrived",
-    body_en: "Dr. Aung Kyaw Moe has arrived and is now seeing patients in Room 101.",
+    body_en:
+      "Dr. Aung Kyaw Moe has arrived and is now seeing patients in Room 101.",
     title_my: "ဆရာဝန်ကြီး ရောက်ရှိပါပြီ",
-    body_my: "ဒေါက်တာ အောင်ကျော်မိုး ရောက်ရှိပြီး အခန်း ၁၀၁ တွင် လူနာများကို စတင် ကြည့်ရှုနေပါပြီ။",
+    body_my:
+      "ဒေါက်တာ အောင်ကျော်မိုး ရောက်ရှိပြီး အခန်း ၁၀၁ တွင် လူနာများကို စတင် ကြည့်ရှုနေပါပြီ။",
     message_date: TODAY_STR,
     created_at: new Date(Date.now() - 30 * 60000).toISOString(),
   },
 ];
 
-interface LocalPersistedState {
+export interface PersistedClinicState {
+  version: number;
+  settings: ClinicSettings;
   patients: Patient[];
   doctors: Doctor[];
   bookings: Booking[];
@@ -309,6 +358,8 @@ export interface DoctorFormInput {
 interface ClinicContextValue {
   lang: Lang;
   setLang: (lang: Lang) => void;
+  viewport: DeviceViewportInfo;
+  settings: ClinicSettings;
   patients: Patient[];
   doctors: Doctor[];
   bookings: Booking[];
@@ -342,7 +393,10 @@ interface ClinicContextValue {
     patientName: string;
   }>;
   addDoctor: (input: DoctorFormInput) => Promise<Doctor>;
-  updateDoctor: (doctorId: string, input: Partial<DoctorFormInput>) => Promise<void>;
+  updateDoctor: (
+    doctorId: string,
+    input: Partial<DoctorFormInput>
+  ) => Promise<void>;
   removeDoctor: (doctorId: string) => Promise<void>;
   updateDoctorSessionStatus: (
     doctorId: string,
@@ -364,11 +418,18 @@ interface ClinicContextValue {
     kind?: "manual" | "automated";
   }) => Promise<ClinicMessage>;
   addDemoCreditPoints: (amount: number) => Promise<void>;
+  updateClinicSettings: (partial: Partial<ClinicSettings>) => Promise<void>;
+  updateReceptionPin: (currentPin: string, newPin: string) => Promise<boolean>;
+  updateSuperAdminPin: (currentPin: string, newPin: string) => Promise<boolean>;
+  adjustPatientCredits: (patientId: string, newCreditPoints: number) => Promise<void>;
+  resetDemoData: () => Promise<void>;
 }
 
 const ClinicContext = createContext<ClinicContextValue | null>(null);
 
-async function uploadImageToCloudinaryOrDataUrl(file: File): Promise<string> {
+export async function uploadImageToCloudinaryOrDataUrl(
+  file: File
+): Promise<string> {
   const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
@@ -408,7 +469,9 @@ async function generateTicketQrDataUrl(
   ticketCode: string
 ): Promise<string> {
   const origin =
-    typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:3000";
   const ticketUrl = `${origin}/ticket/${bookingId}?code=${ticketCode}`;
   return QRCode.toDataURL(ticketUrl, {
     width: 360,
@@ -421,7 +484,9 @@ async function generateTicketQrDataUrl(
 }
 
 export function ClinicProvider({ children }: { children: React.ReactNode }) {
+  const viewport = useDeviceViewport();
   const [lang, setLangState] = useState<Lang>(DEFAULT_LANGUAGE);
+  const [settings, setSettings] = useState<ClinicSettings>(INITIAL_SETTINGS);
   const [patients, setPatients] = useState<Patient[]>(INITIAL_PATIENTS);
   const [doctors, setDoctors] = useState<Doctor[]>(INITIAL_DOCTORS);
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
@@ -432,7 +497,59 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(true);
 
+  const versionRef = useRef<number>(0);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
+
+  const applyIncomingState = useCallback((incoming: PersistedClinicState) => {
+    if (!incoming || typeof incoming !== "object") return;
+    const incomingVersion = Number(incoming.version || 0);
+    if (incomingVersion > 0 && incomingVersion < versionRef.current) {
+      return;
+    }
+    versionRef.current = incomingVersion || Date.now();
+    if (incoming.settings) {
+      setSettings((prev) => ({ ...prev, ...incoming.settings }));
+    }
+    if (Array.isArray(incoming.doctors)) setDoctors(incoming.doctors);
+    if (Array.isArray(incoming.patients)) setPatients(incoming.patients);
+    if (Array.isArray(incoming.bookings)) setBookings(incoming.bookings);
+    if (Array.isArray(incoming.transactions))
+      setTransactions(incoming.transactions);
+    if (Array.isArray(incoming.messages)) setMessages(incoming.messages);
+  }, []);
+
+  const persistState = useCallback(
+    (next: Omit<PersistedClinicState, "version">) => {
+      const nextVersion = Math.max(Date.now(), versionRef.current + 1);
+      versionRef.current = nextVersion;
+      const fullPayload: PersistedClinicState = {
+        ...next,
+        version: nextVersion,
+      };
+
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(fullPayload));
+        } catch {
+          // Ignore quota errors
+        }
+        try {
+          broadcastRef.current?.postMessage({
+            type: "SYNC_STATE",
+            payload: fullPayload,
+          });
+        } catch {
+          // Ignore BroadcastChannel errors
+        }
+        fetch("/api/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullPayload),
+        }).catch(() => {});
+      }
+    },
+    []
+  );
 
   const setLang = useCallback((nextLang: Lang) => {
     setLangState(nextLang);
@@ -441,59 +558,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const persistState = useCallback((next: LocalPersistedState) => {
-    if (typeof window === "undefined") return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      broadcastRef.current?.postMessage({
-        type: "SYNC_STATE",
-        payload: next,
-      });
-    } catch {
-      // Ignore quota errors
-    }
-  }, []);
-
-  const fetchSupabaseData = useCallback(async () => {
-    if (!supabase || !isSupabaseConfigured) return;
-    try {
-      const [{ data: docs, error: dErr }, { data: bks }, { data: msgs }] =
-        await Promise.all([
-          supabase
-            .from("doctors")
-            .select("*")
-            .eq("is_archived", false)
-            .order("sort_order"),
-          supabase
-            .from("bookings")
-            .select("*")
-            .gte("booking_date", TODAY_STR)
-            .order("queue_number", { ascending: true }),
-          supabase
-            .from("messages")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(50),
-        ]);
-
-      if (!dErr && docs && docs.length > 0) {
-        setDoctors(
-          docs.map((d) => ({
-            ...INITIAL_DOCTORS[0],
-            ...d,
-            consultation_fee:
-              Number(d.consultation_fee) || CLINIC_CONFIG.defaultConsultationFee,
-            current_queue_number: Number(d.current_queue_number) || 0,
-          }))
-        );
-      }
-      if (bks && bks.length > 0) setBookings(bks as Booking[]);
-      if (msgs && msgs.length > 0) setMessages(msgs as ClinicMessage[]);
-    } catch {
-      // Keep local state if Supabase schema isn't migrated yet
-    }
-  }, []);
-
+  // Sync from Server API + BroadcastChannel + Storage Events
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -502,62 +567,99 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setLangState(savedLang);
     }
 
-    const savedStateRaw = localStorage.getItem(STORAGE_KEY);
-    if (savedStateRaw) {
-      try {
-        const parsed = JSON.parse(savedStateRaw) as LocalPersistedState;
-        if (parsed.doctors?.length) setDoctors(parsed.doctors);
-        if (parsed.patients?.length) setPatients(parsed.patients);
-        if (parsed.bookings) setBookings(parsed.bookings);
-        if (parsed.transactions) setTransactions(parsed.transactions);
-        if (parsed.messages) setMessages(parsed.messages);
-      } catch {
-        // Ignore invalid storage
-      }
-    } else {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          patients: INITIAL_PATIENTS,
-          doctors: INITIAL_DOCTORS,
-          bookings: INITIAL_BOOKINGS,
-          transactions: INITIAL_TRANSACTIONS,
-          messages: INITIAL_MESSAGES,
-        })
-      );
-    }
-
     const savedPatientId = localStorage.getItem(PATIENT_SESSION_KEY);
     if (savedPatientId) {
       setCurrentPatientId(savedPatientId);
     }
 
-    setIsLoading(false);
+    // 1. Load local state first for instant render
+    let localLoaded: PersistedClinicState | null = null;
+    const savedStateRaw = localStorage.getItem(STORAGE_KEY);
+    if (savedStateRaw) {
+      try {
+        localLoaded = JSON.parse(savedStateRaw) as PersistedClinicState;
+        applyIncomingState(localLoaded);
+      } catch {
+        // Ignore invalid storage
+      }
+    }
 
+    // 2. Fetch authoritative server state (or seed server if empty)
+    const syncFromServer = async () => {
+      try {
+        const res = await fetch(`/api/state?since=${versionRef.current}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setIsRealtimeConnected(true);
+
+        if (!data.hasState) {
+          // Seed server with initial or local state
+          const initialPayload: PersistedClinicState = localLoaded || {
+            version: Date.now(),
+            settings: INITIAL_SETTINGS,
+            patients: INITIAL_PATIENTS,
+            doctors: INITIAL_DOCTORS,
+            bookings: INITIAL_BOOKINGS,
+            transactions: INITIAL_TRANSACTIONS,
+            messages: INITIAL_MESSAGES,
+          };
+          versionRef.current = initialPayload.version;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(initialPayload));
+          await fetch("/api/state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(initialPayload),
+          });
+        } else if (!data.unchanged && data.state) {
+          const serverState = data.state as PersistedClinicState;
+          if (Number(serverState.version || 0) > versionRef.current) {
+            applyIncomingState(serverState);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(serverState));
+            } catch {
+              // Ignore
+            }
+          }
+        }
+      } catch {
+        // Offline ready
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    syncFromServer();
+
+    // 3. Fast 1-second live polling so all windows/devices/tabs stay 100% in sync
+    const pollInterval = window.setInterval(syncFromServer, 1000);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible") {
+        syncFromServer();
+      }
+    };
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    // 4. Instant 0ms BroadcastChannel for same-browser tabs
     if ("BroadcastChannel" in window) {
       const bc = new BroadcastChannel(CHANNEL_NAME);
       bc.onmessage = (event) => {
         if (event.data?.type === "SYNC_STATE" && event.data?.payload) {
-          const p = event.data.payload as LocalPersistedState;
-          setDoctors(p.doctors);
-          setPatients(p.patients);
-          setBookings(p.bookings);
-          setTransactions(p.transactions);
-          setMessages(p.messages || []);
+          applyIncomingState(event.data.payload as PersistedClinicState);
         }
       };
       broadcastRef.current = bc;
     }
 
+    // 5. Instant Storage Event listener
     const handleStorageEvent = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
-          const p = JSON.parse(e.newValue) as LocalPersistedState;
-          setDoctors(p.doctors);
-          setPatients(p.patients);
-          setBookings(p.bookings);
-          setTransactions(p.transactions);
-          setMessages(p.messages || []);
+          const p = JSON.parse(e.newValue) as PersistedClinicState;
+          applyIncomingState(p);
         } catch {
           // Ignore
         }
@@ -565,42 +667,14 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("storage", handleStorageEvent);
 
-    let supabaseChannel: ReturnType<
-      NonNullable<typeof supabase>["channel"]
-    > | null = null;
-
-    if (supabase && isSupabaseConfigured) {
-      fetchSupabaseData();
-      supabaseChannel = supabase
-        .channel("clinic-realtime-v2")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "doctors" },
-          () => fetchSupabaseData()
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "bookings" },
-          () => fetchSupabaseData()
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "messages" },
-          () => fetchSupabaseData()
-        )
-        .subscribe((status) => {
-          setIsRealtimeConnected(status === "SUBSCRIBED" || true);
-        });
-    }
-
     return () => {
+      window.clearInterval(pollInterval);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
       window.removeEventListener("storage", handleStorageEvent);
       broadcastRef.current?.close();
-      if (supabase && supabaseChannel) {
-        supabase.removeChannel(supabaseChannel);
-      }
     };
-  }, [fetchSupabaseData]);
+  }, [applyIncomingState]);
 
   const currentPatient =
     patients.find((p) => p.id === currentPatientId) || null;
@@ -635,25 +709,14 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         nextPatients = [...patients, matched];
       }
 
-      if (supabase && isSupabaseConfigured) {
-        try {
-          await supabase.from("patients").upsert({
-            id: matched.id,
-            phone: matched.phone,
-            name: matched.name,
-            credit_points: matched.credit_points,
-            preferred_language: matched.preferred_language,
-          });
-        } catch {
-          // Fallback to local state
-        }
-      }
-
       setPatients(nextPatients);
       setCurrentPatientId(matched.id);
-      localStorage.setItem(PATIENT_SESSION_KEY, matched.id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(PATIENT_SESSION_KEY, matched.id);
+      }
 
       persistState({
+        settings,
         patients: nextPatients,
         doctors,
         bookings,
@@ -663,7 +726,16 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       return matched;
     },
-    [patients, doctors, bookings, transactions, messages, lang, persistState]
+    [
+      patients,
+      settings,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      lang,
+      persistState,
+    ]
   );
 
   const logoutPatient = useCallback(() => {
@@ -696,7 +768,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Selected doctor was not found.");
       }
 
-      const fee = doctor.consultation_fee || CLINIC_CONFIG.defaultConsultationFee;
+      const fee = doctor.consultation_fee || settings.defaultFee;
 
       if (
         paymentMethod === "credit_points" &&
@@ -731,6 +803,13 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const ticketCode = `AC-${doctor.room_number}-${nextQueueNumber}`;
       const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
 
+      // Mark any older completed bookings for this patient as archived so the new booking is active
+      const cleanedOldBookings = bookings.map((b) =>
+        b.patient_id === currentPatient.id && b.status === "completed"
+          ? { ...b, status: "no_show" as const }
+          : b
+      );
+
       const newBooking: Booking = {
         id: bookingId,
         patient_id: currentPatient.id,
@@ -760,15 +839,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         created_at: new Date().toISOString(),
       };
 
-      if (supabase && isSupabaseConfigured) {
-        try {
-          await supabase.from("bookings").insert(newBooking);
-          await supabase.from("transactions").insert(newTransaction);
-        } catch {
-          // Local fallback
-        }
-      }
-
       const nextPatients = isInstantPaid
         ? patients.map((p) =>
             p.id === currentPatient.id
@@ -777,7 +847,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           )
         : patients;
 
-      const nextBookings = [...bookings, newBooking];
+      const nextBookings = [...cleanedOldBookings, newBooking];
       const nextTransactions = [newTransaction, ...transactions];
 
       setPatients(nextPatients);
@@ -785,6 +855,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setTransactions(nextTransactions);
 
       persistState({
+        settings,
         patients: nextPatients,
         doctors,
         bookings: nextBookings,
@@ -797,6 +868,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     [
       currentPatient,
       doctors,
+      settings,
       bookings,
       patients,
       transactions,
@@ -829,7 +901,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       let pat = patients.find(
         (p) => p.phone.replace(/\D/g, "") === cleanedPhone
       );
-      let nextPatients = [...patients];
+      const nextPatients = [...patients];
 
       if (!pat) {
         pat = {
@@ -853,7 +925,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       );
       const nextQueueNumber = highestBookedQueue + 1;
       const bookingId = crypto.randomUUID();
-      const ticketCode = `${isPriority ? "VIP" : "WK"}-${doctor.room_number}-${nextQueueNumber}`;
+      const ticketCode = `${isPriority ? "VIP" : "WK"}-${
+        doctor.room_number
+      }-${nextQueueNumber}`;
       const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
 
       const newBooking: Booking = {
@@ -893,6 +967,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setTransactions(nextTransactions);
 
       persistState({
+        settings,
         patients: nextPatients,
         doctors,
         bookings: nextBookings,
@@ -902,7 +977,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       return newBooking;
     },
-    [doctors, patients, bookings, transactions, messages, persistState]
+    [
+      doctors,
+      patients,
+      bookings,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const advanceDoctorQueue = useCallback(
@@ -925,8 +1008,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       );
 
       const nextBookings = bookings.map((b) => {
-        if (b.doctor_id !== doctorId || b.booking_date !== TODAY_STR) return b;
-        if (b.status === "cancelled") return b;
+        if (b.doctor_id !== doctorId) return b;
+        if (b.status === "cancelled" || b.status === "no_show") return b;
         if (b.queue_number < newQueueNumber) {
           return { ...b, status: "completed" as const };
         }
@@ -937,7 +1020,10 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
             called_at: new Date().toISOString(),
           };
         }
-        return b;
+        return {
+          ...b,
+          status: "waiting" as const,
+        };
       });
 
       // Automated messages for called patient & next 3 patients
@@ -945,8 +1031,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         .filter(
           (b) =>
             b.doctor_id === doctorId &&
-            b.booking_date === TODAY_STR &&
             b.status !== "cancelled" &&
+            b.status !== "no_show" &&
             b.queue_number >= newQueueNumber &&
             b.queue_number <= newQueueNumber + 3
         )
@@ -958,9 +1044,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       for (const b of upcomingBookings) {
         const pat = patients.find((p) => p.id === b.patient_id);
         const diff = b.queue_number - newQueueNumber;
-        notifiedLabels.push(
-          `#${b.queue_number} ${pat?.name || "Patient"}`
-        );
+        notifiedLabels.push(`#${b.queue_number} ${pat?.name || "Patient"}`);
 
         const tpl =
           diff === 0
@@ -997,6 +1081,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setMessages(nextMessages);
 
       persistState({
+        settings,
         patients,
         doctors: nextDoctors,
         bookings: nextBookings,
@@ -1015,6 +1100,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       patients,
       transactions,
       messages,
+      settings,
       currentPatient,
       lang,
       persistState,
@@ -1029,16 +1115,43 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           ? { ...d, current_queue_number: safeNum, queue_date: TODAY_STR }
           : d
       );
+
+      const nextBookings = bookings.map((b) => {
+        if (b.doctor_id !== doctorId) return b;
+        if (b.status === "cancelled" || b.status === "no_show") return b;
+        if (b.queue_number < safeNum) {
+          return { ...b, status: "completed" as const };
+        }
+        if (b.queue_number === safeNum) {
+          return {
+            ...b,
+            status: "in_progress" as const,
+            called_at: new Date().toISOString(),
+          };
+        }
+        return { ...b, status: "waiting" as const };
+      });
+
       setDoctors(nextDoctors);
+      setBookings(nextBookings);
       persistState({
+        settings,
         patients,
         doctors: nextDoctors,
-        bookings,
+        bookings: nextBookings,
         transactions,
         messages,
       });
     },
-    [doctors, patients, bookings, transactions, messages, persistState]
+    [
+      doctors,
+      patients,
+      bookings,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const verifyReceiptAndConfirmBooking = useCallback(
@@ -1078,6 +1191,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setMessages(nextMessages);
 
       persistState({
+        settings,
         patients,
         doctors,
         bookings: nextBookings,
@@ -1085,7 +1199,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         messages: nextMessages,
       });
     },
-    [bookings, doctors, patients, transactions, messages, persistState]
+    [
+      bookings,
+      doctors,
+      patients,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const cancelBookingAndRefund = useCallback(
@@ -1097,7 +1219,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       const doctor = doctors.find((d) => d.id === booking.doctor_id);
       const refundAmount =
-        doctor?.consultation_fee || CLINIC_CONFIG.defaultConsultationFee;
+        doctor?.consultation_fee || settings.defaultFee;
       const patient = patients.find((p) => p.id === booking.patient_id);
 
       const nextBookings = bookings.map((b) =>
@@ -1161,6 +1283,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setMessages(nextMessages);
 
       persistState({
+        settings,
         patients: nextPatients,
         doctors,
         bookings: nextBookings,
@@ -1173,7 +1296,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         patientName: patient?.name || "Patient",
       };
     },
-    [bookings, doctors, patients, transactions, messages, persistState]
+    [
+      bookings,
+      doctors,
+      patients,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const addDoctor = useCallback(
@@ -1188,7 +1319,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         current_queue_number: 0,
         queue_date: TODAY_STR,
         consultation_fee:
-          Number(input.consultation_fee) || CLINIC_CONFIG.defaultConsultationFee,
+          Number(input.consultation_fee) || settings.defaultFee,
         start_time: input.start_time || "09:00",
         end_time: input.end_time || "12:00",
         max_patients: input.max_patients || 30,
@@ -1206,6 +1337,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const nextDoctors = [...doctors, newDoc];
       setDoctors(nextDoctors);
       persistState({
+        settings,
         patients,
         doctors: nextDoctors,
         bookings,
@@ -1214,7 +1346,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       });
       return newDoc;
     },
-    [doctors, patients, bookings, transactions, messages, persistState]
+    [
+      doctors,
+      patients,
+      bookings,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const updateDoctor = useCallback(
@@ -1233,6 +1373,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       );
       setDoctors(nextDoctors);
       persistState({
+        settings,
         patients,
         doctors: nextDoctors,
         bookings,
@@ -1240,7 +1381,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         messages,
       });
     },
-    [doctors, patients, bookings, transactions, messages, persistState]
+    [
+      doctors,
+      patients,
+      bookings,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const removeDoctor = useCallback(
@@ -1248,6 +1397,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       const nextDoctors = doctors.filter((d) => d.id !== doctorId);
       setDoctors(nextDoctors);
       persistState({
+        settings,
         patients,
         doctors: nextDoctors,
         bookings,
@@ -1255,7 +1405,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         messages,
       });
     },
-    [doctors, patients, bookings, transactions, messages, persistState]
+    [
+      doctors,
+      patients,
+      bookings,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const updateDoctorSessionStatus = useCallback(
@@ -1310,9 +1468,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         });
       } else if (status === "postponed" && postponedTo) {
         nextBookings = bookings.map((b) =>
-          b.doctor_id === doctorId &&
-          b.booking_date === TODAY_STR &&
-          b.status === "waiting"
+          b.doctor_id === doctorId && b.status === "waiting"
             ? { ...b, booking_date: postponedTo }
             : b
         );
@@ -1372,6 +1528,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setMessages(nextMessages);
 
       persistState({
+        settings,
         patients,
         doctors: nextDoctors,
         bookings: nextBookings,
@@ -1379,7 +1536,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         messages: nextMessages,
       });
     },
-    [doctors, bookings, patients, transactions, messages, persistState]
+    [
+      doctors,
+      bookings,
+      patients,
+      transactions,
+      messages,
+      settings,
+      persistState,
+    ]
   );
 
   const sendClinicMessage = useCallback(
@@ -1421,6 +1586,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setMessages(nextMessages);
 
       persistState({
+        settings,
         patients,
         doctors,
         bookings,
@@ -1430,7 +1596,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       return msg;
     },
-    [messages, patients, doctors, bookings, transactions, persistState]
+    [messages, patients, doctors, bookings, transactions, settings, persistState]
   );
 
   const addDemoCreditPoints = useCallback(
@@ -1443,6 +1609,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       );
       setPatients(nextPatients);
       persistState({
+        settings,
         patients: nextPatients,
         doctors,
         bookings,
@@ -1457,15 +1624,160 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       transactions,
       messages,
+      settings,
       persistState,
     ]
   );
+
+  const updateClinicSettings = useCallback(
+    async (partial: Partial<ClinicSettings>) => {
+      const nextSettings: ClinicSettings = {
+        ...settings,
+        ...partial,
+        paymentAccounts: {
+          ...settings.paymentAccounts,
+          ...(partial.paymentAccounts || {}),
+        },
+      };
+      setSettings(nextSettings);
+      persistState({
+        settings: nextSettings,
+        patients,
+        doctors,
+        bookings,
+        transactions,
+        messages,
+      });
+    },
+    [
+      settings,
+      patients,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      persistState,
+    ]
+  );
+
+  const updateReceptionPin = useCallback(
+    async (currentPin: string, newPin: string): Promise<boolean> => {
+      if (currentPin.trim() !== settings.receptionPin) {
+        return false;
+      }
+      if (!newPin.trim() || newPin.trim().length < 4) {
+        return false;
+      }
+      const nextSettings: ClinicSettings = {
+        ...settings,
+        receptionPin: newPin.trim(),
+      };
+      setSettings(nextSettings);
+      persistState({
+        settings: nextSettings,
+        patients,
+        doctors,
+        bookings,
+        transactions,
+        messages,
+      });
+      return true;
+    },
+    [
+      settings,
+      patients,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      persistState,
+    ]
+  );
+
+  const updateSuperAdminPin = useCallback(
+    async (currentPin: string, newPin: string): Promise<boolean> => {
+      if (currentPin.trim() !== settings.superAdminPin) {
+        return false;
+      }
+      if (!newPin.trim() || newPin.trim().length < 4) {
+        return false;
+      }
+      const nextSettings: ClinicSettings = {
+        ...settings,
+        superAdminPin: newPin.trim(),
+      };
+      setSettings(nextSettings);
+      persistState({
+        settings: nextSettings,
+        patients,
+        doctors,
+        bookings,
+        transactions,
+        messages,
+      });
+      return true;
+    },
+    [
+      settings,
+      patients,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      persistState,
+    ]
+  );
+
+  const adjustPatientCredits = useCallback(
+    async (patientId: string, newCreditPoints: number) => {
+      const safeCredits = Math.max(0, Math.floor(newCreditPoints));
+      const nextPatients = patients.map((p) =>
+        p.id === patientId ? { ...p, credit_points: safeCredits } : p
+      );
+      setPatients(nextPatients);
+      persistState({
+        settings,
+        patients: nextPatients,
+        doctors,
+        bookings,
+        transactions,
+        messages,
+      });
+    },
+    [
+      patients,
+      settings,
+      doctors,
+      bookings,
+      transactions,
+      messages,
+      persistState,
+    ]
+  );
+
+  const resetDemoData = useCallback(async () => {
+    setDoctors(INITIAL_DOCTORS);
+    setPatients(INITIAL_PATIENTS);
+    setBookings(INITIAL_BOOKINGS);
+    setTransactions(INITIAL_TRANSACTIONS);
+    setMessages(INITIAL_MESSAGES);
+    persistState({
+      settings,
+      patients: INITIAL_PATIENTS,
+      doctors: INITIAL_DOCTORS,
+      bookings: INITIAL_BOOKINGS,
+      transactions: INITIAL_TRANSACTIONS,
+      messages: INITIAL_MESSAGES,
+    });
+  }, [settings, persistState]);
 
   return (
     <ClinicContext.Provider
       value={{
         lang,
         setLang,
+        viewport,
+        settings,
         patients,
         doctors,
         bookings,
@@ -1488,6 +1800,11 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         updateDoctorSessionStatus,
         sendClinicMessage,
         addDemoCreditPoints,
+        updateClinicSettings,
+        updateReceptionPin,
+        updateSuperAdminPin,
+        adjustPatientCredits,
+        resetDemoData,
       }}
     >
       {children}

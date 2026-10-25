@@ -16,6 +16,34 @@ export type MessageCategory =
   | "cancelled"
   | "payment";
 
+export interface PaymentAccountSetting {
+  provider: string;
+  accountName: string;
+  accountNumber: string;
+  color: string;
+}
+
+export interface ClinicSettings {
+  clinicName: string;
+  clinicNameMy: string;
+  subtitleEn: string;
+  subtitleMy: string;
+  logoUrl: string;
+  primaryColor: string;
+  secondaryColor: string;
+  defaultFee: number;
+  clinicPhone: string;
+  addressMy: string;
+  addressEn: string;
+  receptionPin: string;
+  superAdminPin: string;
+  paymentAccounts: {
+    kpay: PaymentAccountSetting;
+    wavepay: PaymentAccountSetting;
+    ayapay: PaymentAccountSetting;
+  };
+}
+
 export interface Patient {
   id: string;
   phone: string;

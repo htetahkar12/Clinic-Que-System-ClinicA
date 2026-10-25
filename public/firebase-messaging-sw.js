@@ -1,52 +1,35 @@
 /* eslint-disable no-undef */
+// Firebase Cloud Messaging service worker (background push).
+// Config is passed as query params when the app registers this worker.
 importScripts("https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js");
 
-// Initialize Firebase in the service worker when config is passed or available
-self.addEventListener("push", function (event) {
-  let payload = {
-    title: "Clinic Queue Alert",
-    body: "Your queue number is coming up soon. Please prepare to enter the consultation room.",
-    icon: "/logo.svg",
-  };
+const params = new URL(self.location).searchParams;
+const config = {};
+for (const [k, v] of params.entries()) config[k] = v;
 
-  if (event.data) {
-    try {
-      const data = event.data.json();
-      payload = {
-        title: (data.notification && data.notification.title) || data.title || payload.title,
-        body: (data.notification && data.notification.body) || data.body || payload.body,
-        icon: "/logo.svg",
-      };
-    } catch (e) {
-      payload.body = event.data.text();
-    }
-  }
+if (config.apiKey && config.projectId && config.messagingSenderId) {
+  firebase.initializeApp(config);
+  const messaging = firebase.messaging();
+  // Notification payloads are shown automatically by FCM.
+  // Data-only payloads are shown here.
+  messaging.onBackgroundMessage((payload) => {
+    if (payload.notification) return;
+    const title = (payload.data && payload.data.title) || "Clinic";
+    self.registration.showNotification(title, {
+      body: (payload.data && payload.data.body) || "",
+      icon: "/icon-192x192.svg",
+      badge: "/icon-192x192.svg",
+      vibrate: [300, 120, 300, 120, 500],
+    });
+  });
+}
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title, {
-      body: payload.body,
-      icon: payload.icon,
-      badge: "/logo.svg",
-      vibrate: [200, 100, 200, 100, 300],
-      requireInteraction: true,
-    })
-  );
-});
-
-self.addEventListener("notificationclick", function (event) {
+self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (clientList) {
-      if (clientList.length > 0) {
-        let client = clientList[0];
-        for (let i = 0; i < clientList.length; i++) {
-          if (clientList[i].focused) {
-            client = clientList[i];
-          }
-        }
-        return client.focus();
-      }
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) if ("focus" in c) return c.focus();
       return clients.openWindow("/");
     })
   );

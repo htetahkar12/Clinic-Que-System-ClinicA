@@ -8,89 +8,150 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import QRCode from "qrcode";
 import {
   Patient,
   Doctor,
   Booking,
   Transaction,
+  ClinicMessage,
   PaymentMethod,
-  PushNotificationLog,
+  Lang,
+  DoctorStatus,
 } from "@/lib/types";
-import {
-  supabase,
-  isSupabaseConfigured,
-  uploadReceiptImage,
-} from "@/lib/supabase";
-import {
-  requestFcmToken,
-  triggerLocalBrowserNotification,
-} from "@/lib/firebase";
-import { CLINIC_CONFIG } from "@/clinic.config";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { showLocalNotification } from "@/lib/firebase";
+import { CLINIC_CONFIG, DEFAULT_LANGUAGE } from "@/clinic.config";
+import { clinicToday } from "@/lib/date";
+import { templates } from "@/lib/messages";
 
-const STORAGE_KEY = "auracare_clinic_state_v1";
-const PATIENT_SESSION_KEY = "auracare_current_patient_id_v1";
-const CHANNEL_NAME = "auracare_realtime_channel";
+const STORAGE_KEY = "auracare_clinic_state_v2";
+const PATIENT_SESSION_KEY = "auracare_current_patient_id_v2";
+const LANG_STORAGE_KEY = "auracare_lang_v2";
+const CHANNEL_NAME = "auracare_realtime_channel_v2";
 
 const SAMPLE_RECEIPT_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="480" height="640" viewBox="0 0 480 640">
+  <defs>
+    <linearGradient id="hdr" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B5ED7"/>
+      <stop offset="100%" stop-color="#1E3A8A"/>
+    </linearGradient>
+  </defs>
   <rect width="480" height="640" rx="24" fill="#F8FAFC"/>
   <rect x="24" y="24" width="432" height="592" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
-  <rect x="24" y="24" width="432" height="110" rx="16" fill="#0B5ED7"/>
-  <text x="240" y="72" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="24" font-weight="bold">KBZPay Transfer Receipt</text>
-  <text x="240" y="106" text-anchor="middle" fill="#E2E8F0" font-family="sans-serif" font-size="16">Payment Successful</text>
+  <rect x="24" y="24" width="432" height="115" rx="16" fill="url(#hdr)"/>
+  <text x="240" y="72" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="24" font-weight="bold">KBZPay / Mobile Banking</text>
+  <text x="240" y="106" text-anchor="middle" fill="#E2E8F0" font-family="sans-serif" font-size="16">ငွေလွှဲပြေစာ • Payment Successful</text>
   <circle cx="240" cy="190" r="34" fill="#16A34A"/>
   <path d="M224 190L235 202L258 178" stroke="white" stroke-width="6" fill="none" stroke-linecap="round"/>
   <text x="240" y="268" text-anchor="middle" fill="#0F172A" font-family="sans-serif" font-size="34" font-weight="bold">-15,000 MMK</text>
   <line x1="56" y1="310" x2="424" y2="310" stroke="#E2E8F0" stroke-width="2"/>
   <text x="56" y="355" fill="#475569" font-family="sans-serif" font-size="16">Merchant</text>
   <text x="424" y="355" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">AuraCare Poly Clinic</text>
-  <text x="56" y="405" fill="#475569" font-family="sans-serif" font-size="16">Transaction No.</text>
+  <text x="56" y="405" fill="#475569" font-family="sans-serif" font-size="16">Transaction ID</text>
   <text x="424" y="405" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">KPAY-20261025-88392</text>
-  <text x="56" y="455" fill="#475569" font-family="sans-serif" font-size="16">Account Phone</text>
+  <text x="56" y="455" fill="#475569" font-family="sans-serif" font-size="16">Clinic Account</text>
   <text x="424" y="455" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">09-777-888-999</text>
-  <text x="56" y="505" fill="#475569" font-family="sans-serif" font-size="16">Notes</text>
-  <text x="424" y="505" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">Clinic Consultation Fee</text>
+  <text x="56" y="505" fill="#475569" font-family="sans-serif" font-size="16">Purpose</text>
+  <text x="424" y="505" text-anchor="end" fill="#0F172A" font-family="sans-serif" font-size="16" font-weight="bold">Clinic Queue Booking</text>
 </svg>
 `)}`;
 
-const TODAY_STR = new Date().toISOString().split("T")[0];
+const TODAY_STR = clinicToday();
 
 const INITIAL_DOCTORS: Doctor[] = [
   {
     id: "11111111-1111-4111-8111-111111111101",
     name: "Dr. Aung Kyaw Moe",
-    specialty: "Heart & Blood Pressure Specialist (Cardiology)",
-    room_number: "Room 101 • Ground Floor",
+    name_my: "ဒေါက်တာ အောင်ကျော်မိုး",
+    specialty: "Senior Cardiologist (Heart & Blood Pressure)",
+    specialty_my: "နှလုံးနှင့် သွေးတိုး အထူးကုဆရာဝန်ကြီး",
+    room_number: "101",
     current_queue_number: 3,
-    consultation_fee: CLINIC_CONFIG.defaultConsultationFee,
+    queue_date: TODAY_STR,
+    consultation_fee: 15000,
+    start_time: "09:00",
+    end_time: "12:00",
+    max_patients: 30,
+    avg_consult_minutes: 10,
+    status: "available",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
     is_active: true,
+    is_archived: false,
+    sort_order: 1,
   },
   {
     id: "11111111-1111-4111-8111-111111111102",
     name: "Dr. May Thuzar Win",
+    name_my: "ဒေါက်တာ မေသူဇာဝင်း",
     specialty: "General Physician & Senior Citizen Care",
-    room_number: "Room 102 • Ground Floor",
+    specialty_my: "အထွေထွေရောဂါနှင့် သက်ကြီးရွယ်အို ကျန်းမာရေး အထူးကု",
+    room_number: "102",
     current_queue_number: 5,
-    consultation_fee: CLINIC_CONFIG.defaultConsultationFee,
+    queue_date: TODAY_STR,
+    consultation_fee: 15000,
+    start_time: "09:00",
+    end_time: "13:00",
+    max_patients: 40,
+    avg_consult_minutes: 8,
+    status: "available",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
     is_active: true,
+    is_archived: false,
+    sort_order: 2,
   },
   {
     id: "11111111-1111-4111-8111-111111111103",
     name: "Dr. Zaw Min Tun",
-    specialty: "Bone, Knee & Joint Specialist (Orthopedics)",
-    room_number: "Room 105 • Ground Floor",
+    name_my: "ဒေါက်တာ ဇော်မင်းထွန်း",
+    specialty: "Orthopedic, Bone & Joint Specialist",
+    specialty_my: "အရိုး၊ အကြောနှင့် အဆစ်အမြစ် အထူးကုဆရာဝန်ကြီး",
+    room_number: "105",
     current_queue_number: 1,
-    consultation_fee: CLINIC_CONFIG.defaultConsultationFee,
+    queue_date: TODAY_STR,
+    consultation_fee: 20000,
+    start_time: "13:00",
+    end_time: "16:00",
+    max_patients: 25,
+    avg_consult_minutes: 12,
+    status: "available",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
     is_active: true,
+    is_archived: false,
+    sort_order: 3,
   },
   {
     id: "11111111-1111-4111-8111-111111111104",
     name: "Dr. Khin Myat Noe",
+    name_my: "ဒေါက်တာ ခင်မြတ်နိုး",
     specialty: "Eye & Cataract Specialist (Ophthalmology)",
-    room_number: "Room 201 • Lift Accessible",
+    specialty_my: "မျက်စိနှင့် အတွင်းတိမ် အထူးကုဆရာဝန်ကြီး",
+    room_number: "201",
     current_queue_number: 2,
-    consultation_fee: CLINIC_CONFIG.defaultConsultationFee,
+    queue_date: TODAY_STR,
+    consultation_fee: 20000,
+    start_time: "14:00",
+    end_time: "17:00",
+    max_patients: 25,
+    avg_consult_minutes: 10,
+    status: "available",
+    status_date: TODAY_STR,
+    status_note: null,
+    delay_minutes: 0,
+    postponed_to: null,
     is_active: true,
+    is_archived: false,
+    sort_order: 4,
   },
 ];
 
@@ -98,30 +159,34 @@ const INITIAL_PATIENTS: Patient[] = [
   {
     id: "22222222-2222-4222-8222-222222222201",
     phone: "095123456",
-    name: "U Ba Hlaing",
+    name: "ဦးဘလှိုင် (U Ba Hlaing)",
     credit_points: 30000,
-    fcm_token: "fcm_device_ubahlaing",
+    fcm_token: null,
+    preferred_language: "my",
   },
   {
     id: "22222222-2222-4222-8222-222222222202",
     phone: "0942001122",
-    name: "Daw Mya Sein",
+    name: "ဒေါ်မြစိန် (Daw Mya Sein)",
     credit_points: 15000,
-    fcm_token: "fcm_device_dawmyasein",
+    fcm_token: null,
+    preferred_language: "my",
   },
   {
     id: "22222222-2222-4222-8222-222222222203",
     phone: "0979887766",
-    name: "U Tin Oo",
+    name: "ဦးတင်ဦး (U Tin Oo)",
     credit_points: 0,
-    fcm_token: "fcm_device_utinoo",
+    fcm_token: null,
+    preferred_language: "my",
   },
   {
     id: "22222222-2222-4222-8222-222222222204",
     phone: "0997112233",
-    name: "Daw Khin Saw",
+    name: "ဒေါ်ခင်စော (Daw Khin Saw)",
     credit_points: 45000,
-    fcm_token: "fcm_device_dawkhinsaw",
+    fcm_token: null,
+    preferred_language: "my",
   },
 ];
 
@@ -134,6 +199,13 @@ const INITIAL_BOOKINGS: Booking[] = [
     queue_number: 3,
     status: "in_progress",
     payment_status: "paid",
+    ticket_code: "AC-103",
+    source: "online",
+    is_priority: false,
+    checked_in_at: new Date(Date.now() - 40 * 60000).toISOString(),
+    called_at: new Date(Date.now() - 5 * 60000).toISOString(),
+    notified_near_at: new Date(Date.now() - 20 * 60000).toISOString(),
+    qr_image_url: null,
     created_at: new Date(Date.now() - 45 * 60000).toISOString(),
   },
   {
@@ -144,6 +216,13 @@ const INITIAL_BOOKINGS: Booking[] = [
     queue_number: 4,
     status: "waiting",
     payment_status: "pending",
+    ticket_code: "AC-104",
+    source: "online",
+    is_priority: false,
+    checked_in_at: null,
+    called_at: null,
+    notified_near_at: null,
+    qr_image_url: null,
     created_at: new Date(Date.now() - 25 * 60000).toISOString(),
   },
   {
@@ -154,17 +233,14 @@ const INITIAL_BOOKINGS: Booking[] = [
     queue_number: 5,
     status: "waiting",
     payment_status: "paid",
+    ticket_code: "AC-105",
+    source: "online",
+    is_priority: false,
+    checked_in_at: null,
+    called_at: null,
+    notified_near_at: null,
+    qr_image_url: null,
     created_at: new Date(Date.now() - 15 * 60000).toISOString(),
-  },
-  {
-    id: "33333333-3333-4333-8333-333333333304",
-    patient_id: "22222222-2222-4222-8222-222222222202",
-    doctor_id: "11111111-1111-4111-8111-111111111102",
-    booking_date: TODAY_STR,
-    queue_number: 6,
-    status: "waiting",
-    payment_status: "paid",
-    created_at: new Date(Date.now() - 10 * 60000).toISOString(),
   },
 ];
 
@@ -191,20 +267,53 @@ const INITIAL_TRANSACTIONS: Transaction[] = [
   },
 ];
 
+const INITIAL_MESSAGES: ClinicMessage[] = [
+  {
+    id: "55555555-5555-4555-8555-555555555501",
+    doctor_id: "11111111-1111-4111-8111-111111111101",
+    booking_id: null,
+    patient_id: null,
+    kind: "automated",
+    category: "available",
+    title_en: "Doctor has arrived",
+    body_en: "Dr. Aung Kyaw Moe has arrived and is now seeing patients in Room 101.",
+    title_my: "ဆရာဝန်ကြီး ရောက်ရှိပါပြီ",
+    body_my: "ဒေါက်တာ အောင်ကျော်မိုး ရောက်ရှိပြီး အခန်း ၁၀၁ တွင် လူနာများကို စတင် ကြည့်ရှုနေပါပြီ။",
+    message_date: TODAY_STR,
+    created_at: new Date(Date.now() - 30 * 60000).toISOString(),
+  },
+];
+
 interface LocalPersistedState {
   patients: Patient[];
   doctors: Doctor[];
   bookings: Booking[];
   transactions: Transaction[];
-  pushLogs: PushNotificationLog[];
+  messages: ClinicMessage[];
+}
+
+export interface DoctorFormInput {
+  name: string;
+  name_my: string;
+  specialty: string;
+  specialty_my: string;
+  room_number: string;
+  consultation_fee: number;
+  start_time: string;
+  end_time: string;
+  max_patients?: number;
+  avg_consult_minutes?: number;
+  is_active?: boolean;
 }
 
 interface ClinicContextValue {
+  lang: Lang;
+  setLang: (lang: Lang) => void;
   patients: Patient[];
   doctors: Doctor[];
   bookings: Booking[];
   transactions: Transaction[];
-  pushLogs: PushNotificationLog[];
+  messages: ClinicMessage[];
   currentPatient: Patient | null;
   isLoading: boolean;
   isRealtimeConnected: boolean;
@@ -212,35 +321,125 @@ interface ClinicContextValue {
   logoutPatient: () => void;
   createBooking: (params: {
     doctorId: string;
-    paymentMethod: "kpay" | "wavepay" | "credit_points";
+    paymentMethod: "kpay" | "wavepay" | "ayapay" | "credit_points";
     receiptFile?: File | null;
+  }) => Promise<Booking>;
+  createWalkInBooking: (params: {
+    doctorId: string;
+    patientName: string;
+    patientPhone: string;
+    isPriority: boolean;
+    paymentMethod: "cash" | "kpay" | "wavepay" | "ayapay";
   }) => Promise<Booking>;
   advanceDoctorQueue: (doctorId: string) => Promise<{
     newQueueNumber: number;
     notifiedPatients: string[];
   }>;
+  setCustomQueueNumber: (doctorId: string, queueNumber: number) => Promise<void>;
   verifyReceiptAndConfirmBooking: (bookingId: string) => Promise<void>;
   cancelBookingAndRefund: (bookingId: string) => Promise<{
     refundedAmount: number;
     patientName: string;
   }>;
+  addDoctor: (input: DoctorFormInput) => Promise<Doctor>;
+  updateDoctor: (doctorId: string, input: Partial<DoctorFormInput>) => Promise<void>;
+  removeDoctor: (doctorId: string) => Promise<void>;
+  updateDoctorSessionStatus: (
+    doctorId: string,
+    params: {
+      status: DoctorStatus;
+      delayMinutes?: number;
+      postponedTo?: string | null;
+      note?: string | null;
+    }
+  ) => Promise<void>;
+  sendClinicMessage: (params: {
+    doctorId?: string | null;
+    bookingId?: string | null;
+    patientId?: string | null;
+    titleMy: string;
+    bodyMy: string;
+    titleEn?: string;
+    bodyEn?: string;
+    kind?: "manual" | "automated";
+  }) => Promise<ClinicMessage>;
   addDemoCreditPoints: (amount: number) => Promise<void>;
 }
 
 const ClinicContext = createContext<ClinicContextValue | null>(null);
 
+async function uploadImageToCloudinaryOrDataUrl(file: File): Promise<string> {
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+  if (
+    cloudName &&
+    uploadPreset &&
+    !cloudName.includes("your-cloudinary") &&
+    !uploadPreset.includes("your-unsigned")
+  ) {
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("upload_preset", uploadPreset);
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        { method: "POST", body: form }
+      );
+      if (res.ok) {
+        const json = await res.json();
+        if (json.secure_url) return json.secure_url as string;
+      }
+    } catch {
+      // Fall back to Data URL
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (e) => reject(e);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function generateTicketQrDataUrl(
+  bookingId: string,
+  ticketCode: string
+): Promise<string> {
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const ticketUrl = `${origin}/ticket/${bookingId}?code=${ticketCode}`;
+  return QRCode.toDataURL(ticketUrl, {
+    width: 360,
+    margin: 2,
+    color: {
+      dark: "#0F172A",
+      light: "#FFFFFF",
+    },
+  });
+}
+
 export function ClinicProvider({ children }: { children: React.ReactNode }) {
+  const [lang, setLangState] = useState<Lang>(DEFAULT_LANGUAGE);
   const [patients, setPatients] = useState<Patient[]>(INITIAL_PATIENTS);
   const [doctors, setDoctors] = useState<Doctor[]>(INITIAL_DOCTORS);
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
   const [transactions, setTransactions] =
     useState<Transaction[]>(INITIAL_TRANSACTIONS);
-  const [pushLogs, setPushLogs] = useState<PushNotificationLog[]>([]);
+  const [messages, setMessages] = useState<ClinicMessage[]>(INITIAL_MESSAGES);
   const [currentPatientId, setCurrentPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(true);
 
   const broadcastRef = useRef<BroadcastChannel | null>(null);
+
+  const setLang = useCallback((nextLang: Lang) => {
+    setLangState(nextLang);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(LANG_STORAGE_KEY, nextLang);
+    }
+  }, []);
 
   const persistState = useCallback((next: LocalPersistedState) => {
     if (typeof window === "undefined") return;
@@ -258,60 +457,51 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const fetchSupabaseData = useCallback(async () => {
     if (!supabase || !isSupabaseConfigured) return;
     try {
-      const [
-        { data: docs },
-        { data: pats },
-        { data: bks },
-        { data: txs },
-      ] = await Promise.all([
-        supabase.from("doctors").select("*").order("room_number"),
-        supabase.from("patients").select("*"),
-        supabase
-          .from("bookings")
-          .select("*")
-          .eq("booking_date", TODAY_STR)
-          .order("queue_number", { ascending: true }),
-        supabase
-          .from("transactions")
-          .select("*")
-          .order("created_at", { ascending: false }),
-      ]);
+      const [{ data: docs, error: dErr }, { data: bks }, { data: msgs }] =
+        await Promise.all([
+          supabase
+            .from("doctors")
+            .select("*")
+            .eq("is_archived", false)
+            .order("sort_order"),
+          supabase
+            .from("bookings")
+            .select("*")
+            .gte("booking_date", TODAY_STR)
+            .order("queue_number", { ascending: true }),
+          supabase
+            .from("messages")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(50),
+        ]);
 
-      if (docs && docs.length > 0) {
+      if (!dErr && docs && docs.length > 0) {
         setDoctors(
           docs.map((d) => ({
+            ...INITIAL_DOCTORS[0],
             ...d,
             consultation_fee:
               Number(d.consultation_fee) || CLINIC_CONFIG.defaultConsultationFee,
+            current_queue_number: Number(d.current_queue_number) || 0,
           }))
         );
       }
-      if (pats) {
-        setPatients(
-          pats.map((p) => ({
-            ...p,
-            credit_points: Number(p.credit_points) || 0,
-          }))
-        );
-      }
-      if (bks) setBookings(bks);
-      if (txs) {
-        setTransactions(
-          txs.map((t) => ({
-            ...t,
-            amount: Number(t.amount) || 0,
-          }))
-        );
-      }
+      if (bks && bks.length > 0) setBookings(bks as Booking[]);
+      if (msgs && msgs.length > 0) setMessages(msgs as ClinicMessage[]);
     } catch {
-      // Keep local fallback state
+      // Keep local state if Supabase schema isn't migrated yet
     }
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // 1. Hydrate from localStorage
+    const savedLang = localStorage.getItem(LANG_STORAGE_KEY) as Lang | null;
+    if (savedLang === "my" || savedLang === "en") {
+      setLangState(savedLang);
+    }
+
     const savedStateRaw = localStorage.getItem(STORAGE_KEY);
     if (savedStateRaw) {
       try {
@@ -320,7 +510,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         if (parsed.patients?.length) setPatients(parsed.patients);
         if (parsed.bookings) setBookings(parsed.bookings);
         if (parsed.transactions) setTransactions(parsed.transactions);
-        if (parsed.pushLogs) setPushLogs(parsed.pushLogs);
+        if (parsed.messages) setMessages(parsed.messages);
       } catch {
         // Ignore invalid storage
       }
@@ -332,7 +522,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           doctors: INITIAL_DOCTORS,
           bookings: INITIAL_BOOKINGS,
           transactions: INITIAL_TRANSACTIONS,
-          pushLogs: [],
+          messages: INITIAL_MESSAGES,
         })
       );
     }
@@ -344,7 +534,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
     setIsLoading(false);
 
-    // 2. Setup Cross-Tab BroadcastChannel Realtime Sync
     if ("BroadcastChannel" in window) {
       const bc = new BroadcastChannel(CHANNEL_NAME);
       bc.onmessage = (event) => {
@@ -354,7 +543,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           setPatients(p.patients);
           setBookings(p.bookings);
           setTransactions(p.transactions);
-          setPushLogs(p.pushLogs || []);
+          setMessages(p.messages || []);
         }
       };
       broadcastRef.current = bc;
@@ -368,7 +557,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           setPatients(p.patients);
           setBookings(p.bookings);
           setTransactions(p.transactions);
-          setPushLogs(p.pushLogs || []);
+          setMessages(p.messages || []);
         } catch {
           // Ignore
         }
@@ -376,14 +565,14 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("storage", handleStorageEvent);
 
-    // 3. Setup Supabase Realtime Subscription if configured
-    let supabaseChannel: ReturnType<NonNullable<typeof supabase>["channel"]> | null =
-      null;
+    let supabaseChannel: ReturnType<
+      NonNullable<typeof supabase>["channel"]
+    > | null = null;
 
     if (supabase && isSupabaseConfigured) {
       fetchSupabaseData();
       supabaseChannel = supabase
-        .channel("clinic-realtime-changes")
+        .channel("clinic-realtime-v2")
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "doctors" },
@@ -396,12 +585,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         )
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "patients" },
-          () => fetchSupabaseData()
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "transactions" },
+          { event: "*", schema: "public", table: "messages" },
           () => fetchSupabaseData()
         )
         .subscribe((status) => {
@@ -424,62 +608,6 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const loginWithPhoneOtp = useCallback(
     async (phone: string, name?: string): Promise<Patient> => {
       const normalizedPhone = phone.replace(/\D/g, "");
-      const fcmToken = await requestFcmToken();
-
-      if (supabase && isSupabaseConfigured) {
-        const { data: existing } = await supabase
-          .from("patients")
-          .select("*")
-          .eq("phone", normalizedPhone)
-          .maybeSingle();
-
-        if (existing) {
-          const updatedName =
-            name && name.trim().length > 0 ? name.trim() : existing.name;
-          const { data: updated } = await supabase
-            .from("patients")
-            .update({
-              name: updatedName,
-              fcm_token: fcmToken || existing.fcm_token,
-            })
-            .eq("id", existing.id)
-            .select("*")
-            .single();
-
-          const patientObj: Patient = {
-            ...(updated || existing),
-            credit_points: Number((updated || existing).credit_points) || 0,
-          };
-          setCurrentPatientId(patientObj.id);
-          localStorage.setItem(PATIENT_SESSION_KEY, patientObj.id);
-          await fetchSupabaseData();
-          return patientObj;
-        } else {
-          const { data: created, error } = await supabase
-            .from("patients")
-            .insert({
-              phone: normalizedPhone,
-              name: name?.trim() || `Patient (${normalizedPhone.slice(-4)})`,
-              credit_points: 30000, // Welcome credit points for instant testing
-              fcm_token: fcmToken,
-            })
-            .select("*")
-            .single();
-
-          if (!error && created) {
-            const patientObj: Patient = {
-              ...created,
-              credit_points: Number(created.credit_points) || 0,
-            };
-            setCurrentPatientId(patientObj.id);
-            localStorage.setItem(PATIENT_SESSION_KEY, patientObj.id);
-            await fetchSupabaseData();
-            return patientObj;
-          }
-        }
-      }
-
-      // Local / Hybrid state handling
       let matched = patients.find(
         (p) => p.phone.replace(/\D/g, "") === normalizedPhone
       );
@@ -489,7 +617,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         matched = {
           ...matched,
           name: name?.trim() ? name.trim() : matched.name,
-          fcm_token: fcmToken || matched.fcm_token,
+          preferred_language: lang,
         };
         nextPatients = patients.map((p) =>
           p.id === matched!.id ? matched! : p
@@ -498,12 +626,27 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         matched = {
           id: crypto.randomUUID(),
           phone: normalizedPhone,
-          name: name?.trim() || `Daw / U (${normalizedPhone.slice(-4)})`,
-          credit_points: 30000, // Pre-loaded 30,000 MMK credit points for 1-click checkout testing
-          fcm_token: fcmToken,
+          name: name?.trim() || `လူနာ (${normalizedPhone.slice(-4)})`,
+          credit_points: 30000,
+          fcm_token: null,
+          preferred_language: lang,
           created_at: new Date().toISOString(),
         };
         nextPatients = [...patients, matched];
+      }
+
+      if (supabase && isSupabaseConfigured) {
+        try {
+          await supabase.from("patients").upsert({
+            id: matched.id,
+            phone: matched.phone,
+            name: matched.name,
+            credit_points: matched.credit_points,
+            preferred_language: matched.preferred_language,
+          });
+        } catch {
+          // Fallback to local state
+        }
       }
 
       setPatients(nextPatients);
@@ -515,12 +658,12 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         doctors,
         bookings,
         transactions,
-        pushLogs,
+        messages,
       });
 
       return matched;
     },
-    [patients, doctors, bookings, transactions, pushLogs, persistState, fetchSupabaseData]
+    [patients, doctors, bookings, transactions, messages, lang, persistState]
   );
 
   const logoutPatient = useCallback(() => {
@@ -537,11 +680,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       receiptFile,
     }: {
       doctorId: string;
-      paymentMethod: "kpay" | "wavepay" | "credit_points";
+      paymentMethod: "kpay" | "wavepay" | "ayapay" | "credit_points";
       receiptFile?: File | null;
     }): Promise<Booking> => {
       if (!currentPatient) {
-        throw new Error("Please sign in with your phone number first.");
+        throw new Error(
+          lang === "my"
+            ? "ကျေးဇူးပြု၍ ဖုန်းနံပါတ်ဖြင့် အရင် ဝင်ရောက်ပေးပါ။"
+            : "Please sign in with your phone number first."
+        );
       }
 
       const doctor = doctors.find((d) => d.id === doctorId);
@@ -555,22 +702,22 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         paymentMethod === "credit_points" &&
         currentPatient.credit_points < fee
       ) {
-        throw new Error("Insufficient Credit Points for 1-click checkout.");
+        throw new Error(
+          lang === "my"
+            ? "Credit Points လက်ကျန် မလုံလောက်ပါ။"
+            : "Insufficient Credit Points for 1-click checkout."
+        );
       }
 
       let receiptImageUrl: string | null = null;
       if (paymentMethod !== "credit_points") {
         if (receiptFile) {
-          receiptImageUrl = await uploadReceiptImage(
-            receiptFile,
-            currentPatient.id
-          );
+          receiptImageUrl = await uploadImageToCloudinaryOrDataUrl(receiptFile);
         } else {
           receiptImageUrl = SAMPLE_RECEIPT_SVG;
         }
       }
 
-      // Compute next queue number for this doctor today
       const doctorBookingsToday = bookings.filter(
         (b) => b.doctor_id === doctorId && b.booking_date === TODAY_STR
       );
@@ -579,55 +726,26 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         doctor.current_queue_number
       );
       const nextQueueNumber = highestBookedQueue + 1;
-
       const isInstantPaid = paymentMethod === "credit_points";
-
-      if (supabase && isSupabaseConfigured) {
-        const { data: insertedBooking, error: bErr } = await supabase
-          .from("bookings")
-          .insert({
-            patient_id: currentPatient.id,
-            doctor_id: doctorId,
-            booking_date: TODAY_STR,
-            queue_number: nextQueueNumber,
-            status: "waiting",
-            payment_status: isInstantPaid ? "paid" : "pending",
-          })
-          .select("*")
-          .single();
-
-        if (!bErr && insertedBooking) {
-          if (isInstantPaid) {
-            await supabase
-              .from("patients")
-              .update({
-                credit_points: Math.max(0, currentPatient.credit_points - fee),
-              })
-              .eq("id", currentPatient.id);
-          }
-
-          await supabase.from("transactions").insert({
-            patient_id: currentPatient.id,
-            booking_id: insertedBooking.id,
-            amount: fee,
-            payment_method: paymentMethod,
-            receipt_image_url: receiptImageUrl,
-            type: "payment",
-          });
-
-          await fetchSupabaseData();
-          return insertedBooking as Booking;
-        }
-      }
+      const bookingId = crypto.randomUUID();
+      const ticketCode = `AC-${doctor.room_number}-${nextQueueNumber}`;
+      const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
 
       const newBooking: Booking = {
-        id: crypto.randomUUID(),
+        id: bookingId,
         patient_id: currentPatient.id,
         doctor_id: doctorId,
         booking_date: TODAY_STR,
         queue_number: nextQueueNumber,
         status: "waiting",
         payment_status: isInstantPaid ? "paid" : "pending",
+        ticket_code: ticketCode,
+        source: "online",
+        is_priority: false,
+        checked_in_at: null,
+        called_at: null,
+        notified_near_at: null,
+        qr_image_url: qrDataUrl,
         created_at: new Date().toISOString(),
       };
 
@@ -641,6 +759,15 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         type: "payment",
         created_at: new Date().toISOString(),
       };
+
+      if (supabase && isSupabaseConfigured) {
+        try {
+          await supabase.from("bookings").insert(newBooking);
+          await supabase.from("transactions").insert(newTransaction);
+        } catch {
+          // Local fallback
+        }
+      }
 
       const nextPatients = isInstantPaid
         ? patients.map((p) =>
@@ -662,7 +789,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         doctors,
         bookings: nextBookings,
         transactions: nextTransactions,
-        pushLogs,
+        messages,
       });
 
       return newBooking;
@@ -673,10 +800,109 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       patients,
       transactions,
-      pushLogs,
+      messages,
+      lang,
       persistState,
-      fetchSupabaseData,
     ]
+  );
+
+  const createWalkInBooking = useCallback(
+    async ({
+      doctorId,
+      patientName,
+      patientPhone,
+      isPriority,
+      paymentMethod,
+    }: {
+      doctorId: string;
+      patientName: string;
+      patientPhone: string;
+      isPriority: boolean;
+      paymentMethod: "cash" | "kpay" | "wavepay" | "ayapay";
+    }): Promise<Booking> => {
+      const doctor = doctors.find((d) => d.id === doctorId);
+      if (!doctor) throw new Error("Doctor not found");
+
+      const cleanedPhone =
+        patientPhone.replace(/\D/g, "") ||
+        `09${Math.floor(100000000 + Math.random() * 900000000)}`;
+      let pat = patients.find(
+        (p) => p.phone.replace(/\D/g, "") === cleanedPhone
+      );
+      let nextPatients = [...patients];
+
+      if (!pat) {
+        pat = {
+          id: crypto.randomUUID(),
+          phone: cleanedPhone,
+          name: patientName.trim() || `Walk-in (${cleanedPhone.slice(-4)})`,
+          credit_points: 0,
+          fcm_token: null,
+          preferred_language: "my",
+          created_at: new Date().toISOString(),
+        };
+        nextPatients.push(pat);
+      }
+
+      const doctorBookingsToday = bookings.filter(
+        (b) => b.doctor_id === doctorId && b.booking_date === TODAY_STR
+      );
+      const highestBookedQueue = doctorBookingsToday.reduce(
+        (max, b) => Math.max(max, b.queue_number),
+        doctor.current_queue_number
+      );
+      const nextQueueNumber = highestBookedQueue + 1;
+      const bookingId = crypto.randomUUID();
+      const ticketCode = `${isPriority ? "VIP" : "WK"}-${doctor.room_number}-${nextQueueNumber}`;
+      const qrDataUrl = await generateTicketQrDataUrl(bookingId, ticketCode);
+
+      const newBooking: Booking = {
+        id: bookingId,
+        patient_id: pat.id,
+        doctor_id: doctorId,
+        booking_date: TODAY_STR,
+        queue_number: nextQueueNumber,
+        status: "waiting",
+        payment_status: "paid",
+        ticket_code: ticketCode,
+        source: "walk_in",
+        is_priority: isPriority,
+        checked_in_at: new Date().toISOString(),
+        called_at: null,
+        notified_near_at: null,
+        qr_image_url: qrDataUrl,
+        created_at: new Date().toISOString(),
+      };
+
+      const newTransaction: Transaction = {
+        id: crypto.randomUUID(),
+        patient_id: pat.id,
+        booking_id: newBooking.id,
+        amount: doctor.consultation_fee,
+        payment_method: paymentMethod,
+        receipt_image_url: null,
+        type: "payment",
+        created_at: new Date().toISOString(),
+      };
+
+      const nextBookings = [...bookings, newBooking];
+      const nextTransactions = [newTransaction, ...transactions];
+
+      setPatients(nextPatients);
+      setBookings(nextBookings);
+      setTransactions(nextTransactions);
+
+      persistState({
+        patients: nextPatients,
+        doctors,
+        bookings: nextBookings,
+        transactions: nextTransactions,
+        messages,
+      });
+
+      return newBooking;
+    },
+    [doctors, patients, bookings, transactions, messages, persistState]
   );
 
   const advanceDoctorQueue = useCallback(
@@ -684,19 +910,18 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       doctorId: string
     ): Promise<{ newQueueNumber: number; notifiedPatients: string[] }> => {
       const doctor = doctors.find((d) => d.id === doctorId);
-      if (!doctor) {
-        throw new Error("Doctor not found");
-      }
+      if (!doctor) throw new Error("Doctor not found");
 
       const newQueueNumber = doctor.current_queue_number + 1;
 
-      if (supabase && isSupabaseConfigured) {
-        await supabase.rpc("advance_doctor_queue", { p_doctor_id: doctorId });
-        await fetchSupabaseData();
-      }
-
       const nextDoctors = doctors.map((d) =>
-        d.id === doctorId ? { ...d, current_queue_number: newQueueNumber } : d
+        d.id === doctorId
+          ? {
+              ...d,
+              current_queue_number: newQueueNumber,
+              queue_date: TODAY_STR,
+            }
+          : d
       );
 
       const nextBookings = bookings.map((b) => {
@@ -706,12 +931,16 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
           return { ...b, status: "completed" as const };
         }
         if (b.queue_number === newQueueNumber) {
-          return { ...b, status: "in_progress" as const };
+          return {
+            ...b,
+            status: "in_progress" as const,
+            called_at: new Date().toISOString(),
+          };
         }
         return b;
       });
 
-      // Find the next 3 upcoming waiting/in_progress patients (queueNumber through queueNumber + 2)
+      // Automated messages for called patient & next 3 patients
       const upcomingBookings = nextBookings
         .filter(
           (b) =>
@@ -719,88 +948,65 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
             b.booking_date === TODAY_STR &&
             b.status !== "cancelled" &&
             b.queue_number >= newQueueNumber &&
-            b.queue_number <= newQueueNumber + 2
+            b.queue_number <= newQueueNumber + 3
         )
-        .sort((a, b) => a.queue_number - b.queue_number)
-        .slice(0, 3);
+        .sort((a, b) => a.queue_number - b.queue_number);
 
-      const recipients = upcomingBookings.map((b) => {
+      const autoMessages: ClinicMessage[] = [];
+      const notifiedLabels: string[] = [];
+
+      for (const b of upcomingBookings) {
         const pat = patients.find((p) => p.id === b.patient_id);
-        return {
-          patientId: b.patient_id,
-          patientName: pat?.name || `Queue #${b.queue_number}`,
-          phone: pat?.phone || "",
-          queueNumber: b.queue_number,
-          fcmToken: pat?.fcm_token || null,
-        };
-      });
-
-      // Trigger Firebase FCM push notification API route for the next 3 patients
-      try {
-        await fetch("/api/notify-queue", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            doctorId: doctor.id,
-            doctorName: doctor.name,
-            roomNumber: doctor.room_number,
-            currentQueueNumber: newQueueNumber,
-            recipients,
-          }),
-        });
-      } catch {
-        // Non-blocking fallback
-      }
-
-      // If current logged-in patient is in the notified group, trigger browser notification
-      if (currentPatient) {
-        const myUpcoming = recipients.find(
-          (r) => r.patientId === currentPatient.id
+        const diff = b.queue_number - newQueueNumber;
+        notifiedLabels.push(
+          `#${b.queue_number} ${pat?.name || "Patient"}`
         );
-        if (myUpcoming) {
-          if (myUpcoming.queueNumber === newQueueNumber) {
-            triggerLocalBrowserNotification(
-              `It's Your Turn! Queue #${myUpcoming.queueNumber}`,
-              `Please enter ${doctor.room_number} for ${doctor.name}.`
-            );
-          } else {
-            triggerLocalBrowserNotification(
-              `Queue #${newQueueNumber} Called`,
-              `Your Queue #${myUpcoming.queueNumber} is coming up soon at ${doctor.room_number}.`
-            );
-          }
+
+        const tpl =
+          diff === 0
+            ? templates.yourTurn(doctor, b.queue_number)
+            : templates.turnNear(doctor, b.queue_number, diff);
+
+        autoMessages.push({
+          id: crypto.randomUUID(),
+          doctor_id: doctor.id,
+          booking_id: b.id,
+          patient_id: b.patient_id,
+          kind: "automated",
+          category: tpl.category,
+          title_en: tpl.title_en,
+          body_en: tpl.body_en,
+          title_my: tpl.title_my,
+          body_my: tpl.body_my,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        });
+
+        if (currentPatient && currentPatient.id === b.patient_id) {
+          showLocalNotification(
+            lang === "my" ? tpl.title_my : tpl.title_en,
+            lang === "my" ? tpl.body_my : tpl.body_en
+          );
         }
       }
 
-      const newLog: PushNotificationLog = {
-        id: crypto.randomUUID(),
-        doctorId: doctor.id,
-        doctorName: doctor.name,
-        calledQueueNumber: newQueueNumber,
-        notifiedQueueNumbers: recipients.map((r) => r.queueNumber),
-        patientNames: recipients.map((r) => r.patientName),
-        timestamp: new Date().toISOString(),
-      };
-
-      const nextLogs = [newLog, ...pushLogs].slice(0, 15);
+      const nextMessages = [...autoMessages, ...messages].slice(0, 60);
 
       setDoctors(nextDoctors);
       setBookings(nextBookings);
-      setPushLogs(nextLogs);
+      setMessages(nextMessages);
 
       persistState({
         patients,
         doctors: nextDoctors,
         bookings: nextBookings,
         transactions,
-        pushLogs: nextLogs,
+        messages: nextMessages,
       });
 
       return {
         newQueueNumber,
-        notifiedPatients: recipients.map(
-          (r) => `#${r.queueNumber} ${r.patientName}`
-        ),
+        notifiedPatients: notifiedLabels,
       };
     },
     [
@@ -808,37 +1014,78 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookings,
       patients,
       transactions,
-      pushLogs,
+      messages,
       currentPatient,
+      lang,
       persistState,
-      fetchSupabaseData,
     ]
+  );
+
+  const setCustomQueueNumber = useCallback(
+    async (doctorId: string, queueNumber: number) => {
+      const safeNum = Math.max(0, Math.floor(queueNumber));
+      const nextDoctors = doctors.map((d) =>
+        d.id === doctorId
+          ? { ...d, current_queue_number: safeNum, queue_date: TODAY_STR }
+          : d
+      );
+      setDoctors(nextDoctors);
+      persistState({
+        patients,
+        doctors: nextDoctors,
+        bookings,
+        transactions,
+        messages,
+      });
+    },
+    [doctors, patients, bookings, transactions, messages, persistState]
   );
 
   const verifyReceiptAndConfirmBooking = useCallback(
     async (bookingId: string) => {
-      if (supabase && isSupabaseConfigured) {
-        await supabase
-          .from("bookings")
-          .update({ payment_status: "paid" })
-          .eq("id", bookingId);
-        await fetchSupabaseData();
-      }
+      const booking = bookings.find((b) => b.id === bookingId);
+      const doc = booking
+        ? doctors.find((d) => d.id === booking.doctor_id)
+        : null;
 
       const nextBookings = bookings.map((b) =>
         b.id === bookingId ? { ...b, payment_status: "paid" as const } : b
       );
+
+      let nextMessages = [...messages];
+      if (booking && doc) {
+        const tpl = templates.paymentVerified(doc, booking.queue_number);
+        nextMessages = [
+          {
+            id: crypto.randomUUID(),
+            doctor_id: doc.id,
+            booking_id: booking.id,
+            patient_id: booking.patient_id,
+            kind: "automated" as const,
+            category: tpl.category,
+            title_en: tpl.title_en,
+            body_en: tpl.body_en,
+            title_my: tpl.title_my,
+            body_my: tpl.body_my,
+            message_date: TODAY_STR,
+            created_at: new Date().toISOString(),
+          },
+          ...messages,
+        ].slice(0, 60);
+      }
+
       setBookings(nextBookings);
+      setMessages(nextMessages);
 
       persistState({
         patients,
         doctors,
         bookings: nextBookings,
         transactions,
-        pushLogs,
+        messages: nextMessages,
       });
     },
-    [bookings, patients, doctors, transactions, pushLogs, persistState, fetchSupabaseData]
+    [bookings, doctors, patients, transactions, messages, persistState]
   );
 
   const cancelBookingAndRefund = useCallback(
@@ -846,22 +1093,12 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       bookingId: string
     ): Promise<{ refundedAmount: number; patientName: string }> => {
       const booking = bookings.find((b) => b.id === bookingId);
-      if (!booking) {
-        throw new Error("Booking not found");
-      }
+      if (!booking) throw new Error("Booking not found");
 
       const doctor = doctors.find((d) => d.id === booking.doctor_id);
       const refundAmount =
         doctor?.consultation_fee || CLINIC_CONFIG.defaultConsultationFee;
       const patient = patients.find((p) => p.id === booking.patient_id);
-
-      if (supabase && isSupabaseConfigured) {
-        await supabase.rpc("cancel_booking_and_refund", {
-          p_booking_id: bookingId,
-          p_refund_amount: refundAmount,
-        });
-        await fetchSupabaseData();
-      }
 
       const nextBookings = bookings.map((b) =>
         b.id === bookingId
@@ -892,16 +1129,43 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       const nextTransactions = [refundTransaction, ...transactions];
 
+      let nextMessages = [...messages];
+      if (doctor) {
+        const tpl = templates.bookingCancelled(
+          doctor,
+          booking.queue_number,
+          refundAmount
+        );
+        nextMessages = [
+          {
+            id: crypto.randomUUID(),
+            doctor_id: doctor.id,
+            booking_id: booking.id,
+            patient_id: booking.patient_id,
+            kind: "automated" as const,
+            category: tpl.category,
+            title_en: tpl.title_en,
+            body_en: tpl.body_en,
+            title_my: tpl.title_my,
+            body_my: tpl.body_my,
+            message_date: TODAY_STR,
+            created_at: new Date().toISOString(),
+          },
+          ...messages,
+        ].slice(0, 60);
+      }
+
       setBookings(nextBookings);
       setPatients(nextPatients);
       setTransactions(nextTransactions);
+      setMessages(nextMessages);
 
       persistState({
         patients: nextPatients,
         doctors,
         bookings: nextBookings,
         transactions: nextTransactions,
-        pushLogs,
+        messages: nextMessages,
       });
 
       return {
@@ -909,42 +1173,281 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         patientName: patient?.name || "Patient",
       };
     },
-    [
-      bookings,
-      doctors,
-      patients,
-      transactions,
-      pushLogs,
-      persistState,
-      fetchSupabaseData,
-    ]
+    [bookings, doctors, patients, transactions, messages, persistState]
+  );
+
+  const addDoctor = useCallback(
+    async (input: DoctorFormInput): Promise<Doctor> => {
+      const newDoc: Doctor = {
+        id: crypto.randomUUID(),
+        name: input.name.trim(),
+        name_my: input.name_my.trim() || input.name.trim(),
+        specialty: input.specialty.trim(),
+        specialty_my: input.specialty_my.trim() || input.specialty.trim(),
+        room_number: input.room_number.trim() || "101",
+        current_queue_number: 0,
+        queue_date: TODAY_STR,
+        consultation_fee:
+          Number(input.consultation_fee) || CLINIC_CONFIG.defaultConsultationFee,
+        start_time: input.start_time || "09:00",
+        end_time: input.end_time || "12:00",
+        max_patients: input.max_patients || 30,
+        avg_consult_minutes: input.avg_consult_minutes || 10,
+        status: "available",
+        status_date: TODAY_STR,
+        status_note: null,
+        delay_minutes: 0,
+        postponed_to: null,
+        is_active: input.is_active ?? true,
+        is_archived: false,
+        sort_order: doctors.length + 1,
+      };
+
+      const nextDoctors = [...doctors, newDoc];
+      setDoctors(nextDoctors);
+      persistState({
+        patients,
+        doctors: nextDoctors,
+        bookings,
+        transactions,
+        messages,
+      });
+      return newDoc;
+    },
+    [doctors, patients, bookings, transactions, messages, persistState]
+  );
+
+  const updateDoctor = useCallback(
+    async (doctorId: string, input: Partial<DoctorFormInput>) => {
+      const nextDoctors = doctors.map((d) =>
+        d.id === doctorId
+          ? {
+              ...d,
+              ...input,
+              consultation_fee:
+                input.consultation_fee !== undefined
+                  ? Number(input.consultation_fee)
+                  : d.consultation_fee,
+            }
+          : d
+      );
+      setDoctors(nextDoctors);
+      persistState({
+        patients,
+        doctors: nextDoctors,
+        bookings,
+        transactions,
+        messages,
+      });
+    },
+    [doctors, patients, bookings, transactions, messages, persistState]
+  );
+
+  const removeDoctor = useCallback(
+    async (doctorId: string) => {
+      const nextDoctors = doctors.filter((d) => d.id !== doctorId);
+      setDoctors(nextDoctors);
+      persistState({
+        patients,
+        doctors: nextDoctors,
+        bookings,
+        transactions,
+        messages,
+      });
+    },
+    [doctors, patients, bookings, transactions, messages, persistState]
+  );
+
+  const updateDoctorSessionStatus = useCallback(
+    async (
+      doctorId: string,
+      {
+        status,
+        delayMinutes = 0,
+        postponedTo = null,
+        note = null,
+      }: {
+        status: DoctorStatus;
+        delayMinutes?: number;
+        postponedTo?: string | null;
+        note?: string | null;
+      }
+    ) => {
+      const doc = doctors.find((d) => d.id === doctorId);
+      if (!doc) return;
+
+      const nextDoctors = doctors.map((d) =>
+        d.id === doctorId
+          ? {
+              ...d,
+              status,
+              status_date: TODAY_STR,
+              delay_minutes: status === "delayed" ? delayMinutes : 0,
+              postponed_to: status === "postponed" ? postponedTo : null,
+              status_note: note,
+            }
+          : d
+      );
+
+      let nextBookings = [...bookings];
+      const newAutoMessages: ClinicMessage[] = [];
+
+      if (status === "delayed") {
+        const tpl = templates.delay(doc, delayMinutes || 30, note);
+        newAutoMessages.push({
+          id: crypto.randomUUID(),
+          doctor_id: doc.id,
+          booking_id: null,
+          patient_id: null,
+          kind: "automated",
+          category: tpl.category,
+          title_en: tpl.title_en,
+          body_en: tpl.body_en,
+          title_my: tpl.title_my,
+          body_my: tpl.body_my,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        });
+      } else if (status === "postponed" && postponedTo) {
+        nextBookings = bookings.map((b) =>
+          b.doctor_id === doctorId &&
+          b.booking_date === TODAY_STR &&
+          b.status === "waiting"
+            ? { ...b, booking_date: postponedTo }
+            : b
+        );
+        const tpl = templates.postponed(doc, postponedTo, 1, note);
+        newAutoMessages.push({
+          id: crypto.randomUUID(),
+          doctor_id: doc.id,
+          booking_id: null,
+          patient_id: null,
+          kind: "automated",
+          category: tpl.category,
+          title_en: tpl.title_en,
+          body_en: tpl.body_en,
+          title_my: tpl.title_my,
+          body_my: tpl.body_my,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        });
+      } else if (status === "available") {
+        const tpl = templates.available(doc);
+        newAutoMessages.push({
+          id: crypto.randomUUID(),
+          doctor_id: doc.id,
+          booking_id: null,
+          patient_id: null,
+          kind: "automated",
+          category: tpl.category,
+          title_en: tpl.title_en,
+          body_en: tpl.body_en,
+          title_my: tpl.title_my,
+          body_my: tpl.body_my,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        });
+      } else if (status === "off") {
+        const tpl = templates.sessionCancelled(doc, doc.consultation_fee, note);
+        newAutoMessages.push({
+          id: crypto.randomUUID(),
+          doctor_id: doc.id,
+          booking_id: null,
+          patient_id: null,
+          kind: "automated",
+          category: tpl.category,
+          title_en: tpl.title_en,
+          body_en: tpl.body_en,
+          title_my: tpl.title_my,
+          body_my: tpl.body_my,
+          message_date: TODAY_STR,
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      const nextMessages = [...newAutoMessages, ...messages].slice(0, 60);
+
+      setDoctors(nextDoctors);
+      setBookings(nextBookings);
+      setMessages(nextMessages);
+
+      persistState({
+        patients,
+        doctors: nextDoctors,
+        bookings: nextBookings,
+        transactions,
+        messages: nextMessages,
+      });
+    },
+    [doctors, bookings, patients, transactions, messages, persistState]
+  );
+
+  const sendClinicMessage = useCallback(
+    async ({
+      doctorId = null,
+      bookingId = null,
+      patientId = null,
+      titleMy,
+      bodyMy,
+      titleEn,
+      bodyEn,
+      kind = "manual",
+    }: {
+      doctorId?: string | null;
+      bookingId?: string | null;
+      patientId?: string | null;
+      titleMy: string;
+      bodyMy: string;
+      titleEn?: string;
+      bodyEn?: string;
+      kind?: "manual" | "automated";
+    }): Promise<ClinicMessage> => {
+      const msg: ClinicMessage = {
+        id: crypto.randomUUID(),
+        doctor_id: doctorId,
+        booking_id: bookingId,
+        patient_id: patientId,
+        kind,
+        category: "info",
+        title_my: titleMy.trim() || titleEn?.trim() || "ဆေးခန်း အသိပေးချက်",
+        body_my: bodyMy.trim() || bodyEn?.trim() || "",
+        title_en: titleEn?.trim() || titleMy.trim() || "Clinic Notice",
+        body_en: bodyEn?.trim() || bodyMy.trim() || "",
+        message_date: TODAY_STR,
+        created_at: new Date().toISOString(),
+      };
+
+      const nextMessages = [msg, ...messages].slice(0, 60);
+      setMessages(nextMessages);
+
+      persistState({
+        patients,
+        doctors,
+        bookings,
+        transactions,
+        messages: nextMessages,
+      });
+
+      return msg;
+    },
+    [messages, patients, doctors, bookings, transactions, persistState]
   );
 
   const addDemoCreditPoints = useCallback(
     async (amount: number) => {
       if (!currentPatient) return;
-
-      if (supabase && isSupabaseConfigured) {
-        await supabase
-          .from("patients")
-          .update({ credit_points: currentPatient.credit_points + amount })
-          .eq("id", currentPatient.id);
-        await fetchSupabaseData();
-      }
-
       const nextPatients = patients.map((p) =>
         p.id === currentPatient.id
           ? { ...p, credit_points: p.credit_points + amount }
           : p
       );
-
       setPatients(nextPatients);
       persistState({
         patients: nextPatients,
         doctors,
         bookings,
         transactions,
-        pushLogs,
+        messages,
       });
     },
     [
@@ -953,29 +1456,37 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       doctors,
       bookings,
       transactions,
-      pushLogs,
+      messages,
       persistState,
-      fetchSupabaseData,
     ]
   );
 
   return (
     <ClinicContext.Provider
       value={{
+        lang,
+        setLang,
         patients,
         doctors,
         bookings,
         transactions,
-        pushLogs,
+        messages,
         currentPatient,
         isLoading,
         isRealtimeConnected,
         loginWithPhoneOtp,
         logoutPatient,
         createBooking,
+        createWalkInBooking,
         advanceDoctorQueue,
+        setCustomQueueNumber,
         verifyReceiptAndConfirmBooking,
         cancelBookingAndRefund,
+        addDoctor,
+        updateDoctor,
+        removeDoctor,
+        updateDoctorSessionStatus,
+        sendClinicMessage,
         addDemoCreditPoints,
       }}
     >

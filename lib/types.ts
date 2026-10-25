@@ -1,7 +1,20 @@
-export type BookingStatus = "waiting" | "in_progress" | "completed" | "cancelled";
-export type PaymentStatus = "pending" | "paid" | "refunded";
-export type PaymentMethod = "kpay" | "wavepay" | "credit_points" | "refund";
-export type TransactionType = "payment" | "refund" | "credit_topup";
+export type Lang = "my" | "en";
+
+export type DoctorStatus = "available" | "delayed" | "postponed" | "off";
+export type BookingStatus = "waiting" | "in_progress" | "completed" | "cancelled" | "no_show";
+export type PaymentStatus = "pending" | "paid" | "refunded" | "rejected" | "void";
+export type PaymentMethod = "kpay" | "wavepay" | "ayapay" | "credit_points" | "cash" | "refund";
+export type TransactionType = "payment" | "refund" | "credit_topup" | "adjustment";
+export type MessageCategory =
+  | "info"
+  | "turn_near"
+  | "your_turn"
+  | "recall"
+  | "delay"
+  | "available"
+  | "postponed"
+  | "cancelled"
+  | "payment";
 
 export interface Patient {
   id: string;
@@ -9,17 +22,32 @@ export interface Patient {
   name: string;
   credit_points: number;
   fcm_token: string | null;
+  preferred_language: Lang;
   created_at?: string;
 }
 
 export interface Doctor {
   id: string;
   name: string;
+  name_my: string | null;
   specialty: string;
+  specialty_my: string | null;
   room_number: string;
   current_queue_number: number;
+  queue_date: string | null;
   consultation_fee: number;
+  start_time: string;
+  end_time: string;
+  max_patients: number;
+  avg_consult_minutes: number;
+  status: DoctorStatus;
+  status_date: string | null;
+  status_note: string | null;
+  delay_minutes: number;
+  postponed_to: string | null;
   is_active: boolean;
+  is_archived: boolean;
+  sort_order: number;
 }
 
 export interface Booking {
@@ -30,9 +58,14 @@ export interface Booking {
   queue_number: number;
   status: BookingStatus;
   payment_status: PaymentStatus;
+  ticket_code: string | null;
+  source: "online" | "walk_in";
+  is_priority: boolean;
+  checked_in_at: string | null;
+  called_at: string | null;
+  notified_near_at: string | null;
+  qr_image_url: string | null;
   created_at: string;
-  patient?: Patient;
-  doctor?: Doctor;
 }
 
 export interface Transaction {
@@ -44,16 +77,31 @@ export interface Transaction {
   receipt_image_url: string | null;
   type: TransactionType;
   created_at: string;
-  patient?: Patient;
-  booking?: Booking;
 }
 
-export interface PushNotificationLog {
+export interface ClinicMessage {
   id: string;
-  doctorId: string;
-  doctorName: string;
-  calledQueueNumber: number;
-  notifiedQueueNumbers: number[];
-  patientNames: string[];
-  timestamp: string;
+  doctor_id: string | null;
+  booking_id: string | null;
+  patient_id: string | null;
+  kind: "manual" | "automated";
+  category: MessageCategory;
+  title_en: string;
+  body_en: string;
+  title_my: string;
+  body_my: string;
+  message_date: string;
+  created_at: string;
+}
+
+export type MessageInsert = Omit<ClinicMessage, "id" | "created_at" | "message_date"> & {
+  message_date?: string;
+};
+
+/** Staff-only view of a patient (returned by /api/staff/data). */
+export interface StaffPatient {
+  id: string;
+  phone: string;
+  name: string;
+  credit_points: number;
 }

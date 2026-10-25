@@ -2,176 +2,221 @@
 
 import React, { useState } from "react";
 import { useClinic } from "@/lib/clinic-store";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowRightCircle, Stethoscope, BellRing, Lock } from "lucide-react";
+import {
+  Stethoscope,
+  ArrowRight,
+  UserCheck,
+  Building2,
+  Lock,
+} from "lucide-react";
 
-export default function DoctorMinimalistPortalPage() {
-  const { doctors, advanceDoctorQueue } = useClinic();
+const STAFF_AUTH_STORAGE_KEY = "auracare_staff_authenticated_v1";
+const DEFAULT_STAFF_PIN = process.env.NEXT_PUBLIC_STAFF_PIN || "1234";
+
+export default function DoctorPortalPage() {
+  const { lang, doctors, bookings, patients, advanceDoctorQueue } = useClinic();
+  const activeDoctors = doctors.filter((d) => !d.is_archived);
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>(
-    doctors[0]?.id || "11111111-1111-4111-8111-111111111101"
+    activeDoctors[0]?.id || ""
   );
-  const [isCalling, setIsCalling] = useState(false);
-  const [lastNotified, setLastNotified] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
-  // Doctor/Staff PIN Gate
-  const [isDoctorAuthenticated, setIsDoctorAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return sessionStorage.getItem("clinic_staff_auth") === "true";
-    }
-    return false;
+  const [isStaffAuthed, setIsStaffAuthed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return sessionStorage.getItem(STAFF_AUTH_STORAGE_KEY) === "true";
   });
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
 
-  const handleDoctorLogin = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (pinInput === "1234" || pinInput === "8888") {
-      setIsDoctorAuthenticated(true);
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("clinic_staff_auth", "true");
-      }
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput.trim() === DEFAULT_STAFF_PIN) {
+      sessionStorage.setItem(STAFF_AUTH_STORAGE_KEY, "true");
+      setIsStaffAuthed(true);
       setPinError("");
     } else {
-      setPinError("Invalid Passcode. Default: 1234");
+      setPinError(
+        lang === "my"
+          ? "PIN နံပါတ် မှားယွင်းနေပါသည် (စမ်းသပ်ရန် 1234)"
+          : "Invalid Staff PIN. Use 1234 for demo."
+      );
     }
   };
 
-  const activeDoctor =
-    doctors.find((d) => d.id === selectedDoctorId) || doctors[0];
-
-  if (!isDoctorAuthenticated) {
+  if (!isStaffAuthed) {
     return (
-      <div className="mx-auto max-w-md px-4 py-16">
-        <Card className="border-2 border-slate-900 shadow-2xl">
-          <CardHeader className="space-y-2 border-b-2 border-slate-200 bg-slate-900 text-white rounded-t-xl p-6 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-clinic-primary text-white shadow-md">
-              <Lock className="h-8 w-8" />
+      <div className="mx-auto max-w-md px-4 py-12">
+        <div className="overflow-hidden rounded-3xl border-2 border-slate-300 bg-white shadow-xl">
+          <div className="bg-gradient-to-r from-blue-800 via-indigo-900 to-slate-900 p-6 text-white">
+            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-sky-300">
+              <Lock className="h-7 w-7" />
             </div>
-            <CardTitle className="text-2xl font-black text-white">
-              Doctor Consultation Portal
-            </CardTitle>
-            <p className="text-sm font-semibold text-slate-300">
-              For Consulting Physicians only.
+            <h1 className="text-2xl font-black">
+              {lang === "my"
+                ? "ဆရာဝန်အခန်း ဝင်ရောက်ရန်"
+                : "Doctor Consultation Portal"}
+            </h1>
+            <p className="mt-1 text-sm font-bold text-blue-100">
+              {lang === "my"
+                ? "ဆရာဝန်အခန်း စနစ်သို့ ဝင်ရောက်ရန် PIN နံပါတ် ရိုက်ထည့်ပါ။"
+                : "Enter Staff PIN to open the minimalist Doctor Room display."}
             </p>
-          </CardHeader>
-          <CardContent className="p-6 space-y-5">
-            <form onSubmit={handleDoctorLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-black uppercase text-slate-700 mb-1">
-                  Doctor Passcode
-                </label>
-                <input
-                  type="password"
-                  maxLength={6}
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value)}
-                  placeholder="Enter Passcode (Default: 1234)"
-                  className="w-full text-center tracking-[0.4em] text-2xl font-black rounded-xl border-2 border-slate-900 p-3 bg-slate-50 focus:outline-none focus:ring-4 focus:ring-clinic-primary/40"
-                  autoFocus
-                />
+          </div>
+          <form onSubmit={handlePinSubmit} className="space-y-4 p-6">
+            <div>
+              <label className="mb-1.5 block text-sm font-extrabold text-slate-900">
+                {lang === "my"
+                  ? "ဝန်ထမ်း PIN နံပါတ် (Demo: 1234)"
+                  : "Staff Security PIN (Demo: 1234)"}
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={pinInput}
+                onChange={(e) => {
+                  setPinInput(e.target.value);
+                  setPinError("");
+                }}
+                placeholder="••••"
+                className="min-h-[56px] w-full rounded-2xl border-2 border-slate-900 bg-slate-50 px-4 text-center text-2xl font-black tracking-widest text-slate-950 focus:outline-none"
+              />
+            </div>
+            {pinError && (
+              <div className="rounded-xl border-2 border-red-700 bg-red-50 p-3 text-sm font-extrabold text-red-900">
+                {pinError}
               </div>
-
-              {pinError && (
-                <p className="text-sm font-bold text-red-700 bg-red-50 p-2.5 rounded-lg border border-red-300 text-center">
-                  {pinError}
-                </p>
-              )}
-
-              <Button type="submit" size="lg" className="w-full text-lg">
-                Enter Doctor Room
-              </Button>
-
-              <div className="text-center pt-2">
-                <a
-                  href="/"
-                  className="text-sm font-bold text-clinic-primary hover:underline"
-                >
-                  ← Return to Patient Portal
-                </a>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+            )}
+            <button
+              type="submit"
+              className="flex min-h-[56px] w-full items-center justify-center rounded-2xl bg-gradient-to-r from-blue-700 to-indigo-800 px-6 py-3.5 text-lg font-black text-white shadow-md hover:opacity-95"
+            >
+              {lang === "my" ? "ဆရာဝန်အခန်း ဖွင့်မည်" : "Unlock Doctor Display"}
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
 
-  if (!activeDoctor) return null;
+  const doctor =
+    activeDoctors.find((d) => d.id === selectedDoctorId) || activeDoctors[0];
+  if (!doctor) return null;
+
+  const currentBooking = bookings.find(
+    (b) =>
+      b.doctor_id === doctor.id &&
+      b.queue_number === doctor.current_queue_number &&
+      b.status !== "cancelled"
+  );
+  const currentPatient = patients.find(
+    (p) => p.id === currentBooking?.patient_id
+  );
+
+  const waitingCount = bookings.filter(
+    (b) =>
+      b.doctor_id === doctor.id &&
+      b.status === "waiting" &&
+      b.queue_number > doctor.current_queue_number
+  ).length;
 
   const handleCallNext = async () => {
-    setIsCalling(true);
-    try {
-      const res = await advanceDoctorQueue(activeDoctor.id);
-      setLastNotified(
-        res.notifiedPatients.length > 0
-          ? `Synced with Reception • Alerted ${res.notifiedPatients.join(", ")}`
-          : `Synced with Reception • Queue #${res.newQueueNumber}`
-      );
-    } finally {
-      setIsCalling(false);
-    }
+    const res = await advanceDoctorQueue(doctor.id);
+    setFeedback(
+      lang === "my"
+        ? `လူနာအလှည့် #${res.newQueueNumber} ကို ခေါ်ဆိုပြီးပါပြီ (Reception နှင့် လူနာဖုန်းများသို့ တိုက်ရိုက် ချိတ်ဆက်ပြီး)`
+        : `Called Queue #${res.newQueueNumber}. Synced live with Reception & Patient phones.`
+    );
   };
 
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-88px)] max-w-2xl flex-col justify-between px-4 py-8 sm:px-6">
-      {/* Minimalist Room Selector */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-slate-300 bg-white p-4 shadow-sm">
+    <div className="mx-auto max-w-xl px-4 py-8 sm:py-12">
+      {/* Room Selector */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2.5">
           <Stethoscope className="h-6 w-6 text-clinic-primary" />
-          <span className="text-base font-extrabold text-slate-700">
-            Consultation Room:
+          <span className="text-base font-black text-slate-950">
+            {lang === "my" ? "ဆရာဝန်အခန်း ရွေးရန်" : "Select Consultation Room"}
           </span>
         </div>
         <select
-          aria-label="Select Doctor Room"
-          value={activeDoctor.id}
+          value={doctor.id}
           onChange={(e) => {
             setSelectedDoctorId(e.target.value);
-            setLastNotified(null);
+            setFeedback(null);
           }}
-          className="min-h-[48px] rounded-xl border-2 border-slate-900 bg-slate-50 px-4 py-2 text-lg font-black text-slate-950 focus:outline-none focus:ring-4 focus:ring-clinic-primary/30"
+          className="min-h-[48px] rounded-xl border-2 border-slate-300 bg-slate-50 px-4 py-2 text-base font-extrabold text-slate-950 focus:border-clinic-primary focus:outline-none"
         >
-          {doctors.map((d) => (
+          {activeDoctors.map((d) => (
             <option key={d.id} value={d.id}>
-              {d.name} ({d.room_number})
+              {lang === "my"
+                ? `အခန်း ${d.room_number} — ${d.name_my}`
+                : `Room ${d.room_number} — ${d.name}`}
             </option>
           ))}
         </select>
       </div>
 
-      {/* Massive Ultra-Minimalist Current Queue Display */}
-      <div className="my-8 flex flex-1 flex-col items-center justify-center rounded-3xl border-4 border-slate-900 bg-white p-10 text-center shadow-xl">
-        <p className="text-lg font-black uppercase tracking-widest text-slate-600">
-          {activeDoctor.room_number} • Now Serving
-        </p>
-
-        <div className="my-6 text-[7rem] sm:text-[9.5rem] font-black leading-none tracking-tighter text-slate-950">
-          #{activeDoctor.current_queue_number}
+      {/* Ultra-Minimalist High-Contrast Consultation Card */}
+      <div className="overflow-hidden rounded-3xl border-2 border-slate-300 bg-white text-center shadow-2xl">
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 p-6 text-white">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-1 text-xs font-black uppercase tracking-wider text-sky-300">
+            <Building2 className="h-3.5 w-3.5" />
+            <span>
+              {lang === "my"
+                ? `အခန်း ${doctor.room_number} • ${doctor.name_my}`
+                : `Room ${doctor.room_number} • ${doctor.name}`}
+            </span>
+          </div>
+          <p className="mt-2 text-sm font-extrabold uppercase tracking-widest text-slate-300">
+            {lang === "my"
+              ? "လက်ရှိ ကြည့်ရှုနေသော အလှည့်နံပါတ်"
+              : "Current Queue Number"}
+          </p>
         </div>
 
-        <p className="text-xl font-bold text-slate-800">{activeDoctor.name}</p>
-
-        {lastNotified && (
-          <div className="mt-6 inline-flex items-center gap-2 rounded-full border-2 border-emerald-700 bg-emerald-50 px-4 py-2 text-base font-extrabold text-emerald-950">
-            <BellRing className="h-5 w-5 text-emerald-700" />
-            {lastNotified}
+        <div className="p-8 sm:p-10">
+          <div className="my-2 text-8xl font-black tracking-tighter text-slate-950 sm:text-9xl">
+            #{doctor.current_queue_number}
           </div>
-        )}
-      </div>
 
-      {/* Massive Full-Width [Call Next Patient] Button */}
-      <Button
-        size="xl"
-        onClick={handleCallNext}
-        disabled={isCalling}
-        className="min-h-[88px] w-full rounded-3xl text-2xl sm:text-3xl font-black shadow-xl"
-      >
-        <ArrowRightCircle className="mr-3 h-9 w-9" />
-        {isCalling
-          ? "Calling Next Patient..."
-          : `Call Next Patient (#${activeDoctor.current_queue_number + 1})`}
-      </Button>
+          <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-2xl border-2 border-emerald-700 bg-emerald-50 px-5 py-2.5 text-lg font-black text-emerald-950">
+            <UserCheck className="h-5 w-5 text-emerald-700" />
+            <span>
+              {currentPatient
+                ? currentPatient.name
+                : lang === "my"
+                ? "ကောင်တာမှ လူနာ (Walk-in)"
+                : "Walk-in / Desk Patient"}
+            </span>
+          </div>
+
+          <p className="mt-4 text-base font-extrabold text-slate-700">
+            {lang === "my"
+              ? `အခန်းပြင်ပတွင် စောင့်ဆိုင်းနေသူ (${waitingCount}) ဦး ကျန်ရှိပါသည်`
+              : `${waitingCount} patient(s) waiting outside`}
+          </p>
+
+          {/* Single Full-Width Primary Action Button */}
+          <button
+            type="button"
+            onClick={handleCallNext}
+            className="mt-8 flex min-h-[76px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-8 py-5 text-2xl font-black text-white shadow-xl transition-all hover:opacity-95 active:scale-[0.99]"
+          >
+            <span>
+              {lang === "my"
+                ? `နောက်လူနာ ခေါ်မည် (#${doctor.current_queue_number + 1})`
+                : `Call Next Patient (#${doctor.current_queue_number + 1})`}
+            </span>
+            <ArrowRight className="h-7 w-7" />
+          </button>
+
+          {feedback && (
+            <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-extrabold text-emerald-900">
+              {feedback}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

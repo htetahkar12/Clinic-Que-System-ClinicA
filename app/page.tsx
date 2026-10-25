@@ -1,186 +1,261 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
+import QRCode from "qrcode";
+import {
+  CLINIC_CONFIG,
+  CLINIC_NAME,
+  CLINIC_NAME_MY,
+} from "@/clinic.config";
 import { useClinic } from "@/lib/clinic-store";
-import { Doctor } from "@/lib/types";
-import { CLINIC_CONFIG, CLINIC_NAME } from "@/clinic.config";
+import { Doctor, Booking } from "@/lib/types";
 import { formatCurrency, formatPhoneDisplay } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { enableNotifications } from "@/lib/firebase";
 import {
   Phone,
   ShieldCheck,
-  Delete,
+  ArrowRight,
   ArrowLeft,
   CheckCircle2,
-  Sparkles,
-  Upload,
-  Wallet,
   Clock,
-  MapPin,
-  Stethoscope,
-  BellRing,
-  CalendarCheck,
-  CreditCard,
+  Wallet,
+  Upload,
+  Bell,
+  Sparkles,
   UserCheck,
+  Building2,
+  AlertTriangle,
+  Delete,
+  CalendarClock,
+  QrCode,
+  Download,
+  ExternalLink,
+  Copy,
+  Check,
+  MessageSquareHeart,
+  Crown,
+  XCircle,
 } from "lucide-react";
 
-type PatientScreen =
-  | "DOCTORS_HOME"
-  | "BOOKING_CHECKOUT"
-  | "LIVE_QUEUE_TRACKER";
+type OnboardingStep = "phone" | "otp";
+type PortalView = "doctors" | "checkout" | "tracker";
 
 export default function PatientPortalPage() {
   const {
+    lang,
+    patients,
     doctors,
     bookings,
+    messages,
     currentPatient,
     loginWithPhoneOtp,
     createBooking,
+    cancelBookingAndRefund,
     addDemoCreditPoints,
   } = useClinic();
 
-  // Auth Flow State (Phone -> OTP Verification Mock)
+  // Onboarding State
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>("phone");
   const [phoneInput, setPhoneInput] = useState("095123456");
-  const [nameInput, setNameInput] = useState("U Ba Hlaing");
-  const [authStep, setAuthStep] = useState<"PHONE" | "OTP">("PHONE");
+  const [nameInput, setNameInput] = useState("");
   const [otpInput, setOtpInput] = useState("");
   const [authError, setAuthError] = useState("");
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
 
-  // Navigation & Booking Wizard State
-  const [screen, setScreen] = useState<PatientScreen>("DOCTORS_HOME");
-  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
+  // Portal Navigation State
+  const [view, setView] = useState<PortalView>("doctors");
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<
-    "credit_points" | "kpay" | "wavepay"
+    "credit_points" | "kpay" | "wavepay" | "ayapay"
   >("credit_points");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [bookingError, setBookingError] = useState("");
-  const [activeBookingId, setActiveBookingId] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
+  const [notificationEnabled, setNotificationEnabled] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+  const [fallbackQrUrl, setFallbackQrUrl] = useState<string | null>(null);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
-  // Active bookings for current logged-in patient today
-  const myActiveBookings = useMemo(() => {
-    if (!currentPatient) return [];
-    return bookings
-      .filter(
-        (b) =>
-          b.patient_id === currentPatient.id &&
-          b.status !== "cancelled" &&
-          b.status !== "completed"
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+  const t = useCallbackText(lang);
+
+  // Active booking for logged-in patient
+  const activeBooking: Booking | undefined = useMemo(() => {
+    if (!currentPatient) return undefined;
+    return bookings.find(
+      (b) =>
+        b.patient_id === currentPatient.id &&
+        (b.status === "waiting" || b.status === "in_progress")
+    );
   }, [bookings, currentPatient]);
 
-  const trackedBooking = useMemo(() => {
-    if (activeBookingId) {
-      const found = bookings.find((b) => b.id === activeBookingId);
-      if (found) return found;
+  // Support direct booking URL `?doctor=<id>`
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const docParam = params.get("doctor");
+    if (docParam && doctors.some((d) => d.id === docParam)) {
+      setSelectedDoctorId(docParam);
+      if (currentPatient && !activeBooking) {
+        setView("checkout");
+      }
     }
-    return myActiveBookings[0] || null;
-  }, [activeBookingId, bookings, myActiveBookings]);
+  }, [doctors, currentPatient, activeBooking]);
 
-  const trackedDoctor = useMemo(() => {
-    if (!trackedBooking) return null;
-    return doctors.find((d) => d.id === trackedBooking.doctor_id) || null;
-  }, [trackedBooking, doctors]);
+  // Automatically switch to live tracker if patient has an active booking
+  useEffect(() => {
+    if (activeBooking) {
+      setView("tracker");
+    } else if (view === "tracker") {
+      setView("doctors");
+    }
+  }, [activeBooking, view]);
 
-  // Keypad handlers for Elderly-Friendly Phone & OTP Entry
-  const handlePhoneDigit = (digit: string) => {
+  const selectedDoctor: Doctor | undefined = useMemo(
+    () => doctors.find((d) => d.id === selectedDoctorId),
+    [doctors, selectedDoctorId]
+  );
+
+  // Default payment method selection when opening checkout
+  useEffect(() => {
+    if (selectedDoctor && currentPatient) {
+      if (currentPatient.credit_points >= selectedDoctor.consultation_fee) {
+        setPaymentMethod("credit_points");
+      } else {
+        setPaymentMethod("kpay");
+      }
+    }
+  }, [selectedDoctor, currentPatient]);
+
+  // Generate QR code on client if activeBooking doesn't have qr_image_url cached yet
+  useEffect(() => {
+    if (!activeBooking) {
+      setFallbackQrUrl(null);
+      return;
+    }
+    if (activeBooking.qr_image_url) {
+      setFallbackQrUrl(activeBooking.qr_image_url);
+      return;
+    }
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    const ticketCode =
+      activeBooking.ticket_code || `Q-${activeBooking.queue_number}`;
+    const url = `${origin}/ticket/${activeBooking.id}?code=${ticketCode}`;
+    QRCode.toDataURL(url, {
+      width: 340,
+      margin: 2,
+      color: { dark: "#0F172A", light: "#FFFFFF" },
+    })
+      .then(setFallbackQrUrl)
+      .catch(() => setFallbackQrUrl(null));
+  }, [activeBooking]);
+
+  const handlePhoneKeyPress = (digit: string) => {
     setAuthError("");
-    if (phoneInput.length < 12) {
-      setPhoneInput((prev) => prev + digit);
+    if (onboardingStep === "phone") {
+      if (phoneInput.length < 13) setPhoneInput((prev) => prev + digit);
+    } else {
+      if (otpInput.length < 6) setOtpInput((prev) => prev + digit);
     }
   };
 
-  const handlePhoneBackspace = () => {
+  const handleBackspace = () => {
     setAuthError("");
-    setPhoneInput((prev) => prev.slice(0, -1));
+    if (onboardingStep === "phone") {
+      setPhoneInput((prev) => prev.slice(0, -1));
+    } else {
+      setOtpInput((prev) => prev.slice(0, -1));
+    }
   };
 
-  const handleSendOtp = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleRequestOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
     const cleaned = phoneInput.replace(/\D/g, "");
     if (cleaned.length < 7) {
-      setAuthError("Please enter a valid phone number (at least 7 digits).");
-      return;
-    }
-    setAuthError("");
-    setOtpInput("1234"); // Pre-fill SMS mock code for effortless elderly accessibility
-    setAuthStep("OTP");
-  };
-
-  const handleOtpDigit = (digit: string) => {
-    setAuthError("");
-    if (otpInput.length < 4) {
-      setOtpInput((prev) => prev + digit);
-    }
-  };
-
-  const handleVerifyOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (otpInput.length < 4) {
-      setAuthError("Please enter the 4-digit SMS code (1234).");
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      await loginWithPhoneOtp(phoneInput, nameInput);
-      setAuthStep("PHONE");
-      setOtpInput("");
-    } catch (err: unknown) {
       setAuthError(
-        err instanceof Error ? err.message : "Could not sign in. Please retry."
+        lang === "my"
+          ? "ကျေးဇူးပြု၍ ဖုန်းနံပါတ် မှန်ကန်စွာ ရိုက်ထည့်ပါ (ဥပမာ 095123456)"
+          : "Please enter a valid mobile number (e.g., 095123456)."
       );
+      return;
+    }
+    setIsSendingOtp(true);
+    setAuthError("");
+    try {
+      await fetch("/api/otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send", phone: cleaned }),
+      }).catch(() => {});
+      setOtpInput("1234"); // Pre-fill demo OTP for elderly usability
+      setOnboardingStep("otp");
     } finally {
-      setIsSubmitting(false);
+      setIsSendingOtp(false);
     }
   };
 
-  const handleStartBooking = (doctor: Doctor) => {
-    setSelectedDoctor(doctor);
-    setBookingError("");
-    setReceiptFile(null);
-    setReceiptPreview(null);
-    if (
-      currentPatient &&
-      currentPatient.credit_points >= doctor.consultation_fee
-    ) {
-      setPaymentMethod("credit_points");
-    } else {
-      setPaymentMethod("kpay");
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otpInput.trim().length < 4) {
+      setAuthError(
+        lang === "my"
+          ? "ဂဏန်း ၄ လုံးပါ OTP ကုဒ်ကို ရိုက်ထည့်ပါ (စမ်းသပ်ရန် - 1234)"
+          : "Please enter the 4-digit OTP code (use 1234 for demo)."
+      );
+      return;
     }
-    setScreen("BOOKING_CHECKOUT");
+    await loginWithPhoneOtp(phoneInput, nameInput);
+    setOnboardingStep("phone");
+    setOtpInput("");
+  };
+
+  const handleEnablePushNotifications = async () => {
+    const res = await enableNotifications();
+    if (res.permission === "granted" || res.token) {
+      setNotificationEnabled(true);
+    }
   };
 
   const handleReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setReceiptFile(file);
+    setCheckoutError("");
     const reader = new FileReader();
     reader.onload = () => setReceiptPreview(reader.result as string);
     reader.readAsDataURL(file);
   };
 
   const handleConfirmBooking = async () => {
-    if (!selectedDoctor) return;
-    setBookingError("");
+    if (!selectedDoctor || !currentPatient) return;
+    setCheckoutError("");
+
+    if (
+      paymentMethod === "credit_points" &&
+      currentPatient.credit_points < selectedDoctor.consultation_fee
+    ) {
+      setCheckoutError(
+        lang === "my"
+          ? "သင့်လက်ကျန် Credit Points မလုံလောက်ပါ။ KPay, WavePay သို့မဟုတ် AYA Pay ဖြင့် ပေးချေပေးပါ။"
+          : "Insufficient Credit Points. Please choose KPay, WavePay, or AYA Pay."
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const created = await createBooking({
+      await createBooking({
         doctorId: selectedDoctor.id,
         paymentMethod,
         receiptFile,
       });
-      setActiveBookingId(created.id);
-      setScreen("LIVE_QUEUE_TRACKER");
-    } catch (err: unknown) {
-      setBookingError(
+      setReceiptFile(null);
+      setReceiptPreview(null);
+      setView("tracker");
+    } catch (err) {
+      setCheckoutError(
         err instanceof Error ? err.message : "Could not complete booking."
       );
     } finally {
@@ -188,825 +263,1159 @@ export default function PatientPortalPage() {
     }
   };
 
+  const handleCopyAccountPhone = (phone: string) => {
+    navigator.clipboard?.writeText(phone.replace(/[^0-9]/g, ""));
+    setCopiedPhone(true);
+    setTimeout(() => setCopiedPhone(false), 2000);
+  };
+
+  const handlePatientCancelBooking = async (bookingId: string) => {
+    const res = await cancelBookingAndRefund(bookingId);
+    if (res.refundedAmount > 0) {
+      setCancelNotice(
+        lang === "my"
+          ? `သင့်ရက်ချိန်းကို ပယ်ဖျက်ပြီးပါပြီ။ စမ်းသပ်ခ ${formatCurrency(
+              res.refundedAmount,
+              "my"
+            )} ကို နောက်တစ်ကြိမ် အသုံးပြုနိုင်ရန် Credit Points အဖြစ် သင့်အကောင့်ထဲသို့ အလိုအလျောက် ပြန်ထည့်ပေးထားပါသည်။`
+          : `Your booking has been canceled. ${formatCurrency(
+              res.refundedAmount,
+              "en"
+            )} has been automatically credited to your Credit Points balance.`
+      );
+    } else {
+      setCancelNotice(
+        lang === "my"
+          ? "သင့်ရက်ချိန်းကို ပယ်ဖျက်ပြီးပါပြီ။"
+          : "Your booking has been canceled."
+      );
+    }
+  };
+
   // ============================================================================
-  // SCREEN 1: ELDERLY-FRIENDLY LOGIN (PHONE KEYPAD + SMS OTP MOCK)
+  // 1. FRICTIONLESS SMS OTP ONBOARDING SCREEN
   // ============================================================================
   if (!currentPatient) {
     return (
-      <div className="mx-auto max-w-xl px-4 py-8 sm:px-6">
-        <Card className="border-2 border-slate-900 shadow-xl">
-          <CardHeader className="space-y-3 border-b-2 border-slate-200 bg-slate-900 text-white rounded-t-xl p-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-clinic-primary text-white shadow-inner">
-                <Phone className="h-7 w-7" />
+      <div className="mx-auto max-w-xl px-4 py-6 sm:py-10">
+        {/* Hero Welcome Banner with Royal Gradient */}
+        <div className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-br from-blue-700 via-indigo-800 to-slate-900 p-6 text-white shadow-xl sm:p-8">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-wider text-sky-200 backdrop-blur-sm">
+            <ShieldCheck className="h-4 w-4 text-emerald-300" />
+            <span>
+              {lang === "my"
+                ? "အက်ပ်ဒေါင်းရန်မလို • တိုက်ရိုက် အလှည့်ကြည့်စနစ်"
+                : "No App Download • Instant Live Queue"}
+            </span>
+          </div>
+          <h1 className="text-2xl font-black leading-snug sm:text-3xl">
+            {lang === "my"
+              ? `${CLINIC_NAME_MY} မှ ကြိုဆိုပါသည်`
+              : `Welcome to ${CLINIC_NAME}`}
+          </h1>
+          <p className="mt-2 text-base font-medium leading-relaxed text-blue-100 sm:text-lg">
+            {lang === "my"
+              ? "ဆေးခန်းတွင် အကြာကြီး ထိုင်စောင့်ရန် မလိုဘဲ မိမိဖုန်းဖြင့် အလှည့်နံပါတ် ရယူပြီး အချိန်နှင့်တစ်ပြေးညီ စောင့်ကြည့်နိုင်ပါပြီ။"
+              : "Book your doctor queue number from home and track your live turn directly on your phone."}
+          </p>
+        </div>
+
+        <div className="rounded-3xl border-2 border-slate-200 bg-white p-6 shadow-lg sm:p-8">
+          <h2 className="text-xl font-black text-slate-950 sm:text-2xl">
+            {onboardingStep === "phone"
+              ? lang === "my"
+                ? "ဖုန်းနံပါတ်ဖြင့် ဝင်ရောက်ပါ"
+                : "Enter Your Phone Number"
+              : lang === "my"
+              ? "SMS အတည်ပြုကုဒ် (OTP) ရိုက်ထည့်ပါ"
+              : "Enter 4-Digit SMS Code"}
+          </h2>
+          <p className="mt-1.5 text-base font-medium text-slate-700">
+            {onboardingStep === "phone"
+              ? lang === "my"
+                ? "သင့်ဖုန်းနံပါတ်ကို အောက်ပါ ခလုတ်ကြီးများဖြင့် အလွယ်တကူ နှိပ်ပါ။"
+                : "Tap the large buttons below to enter your mobile number."
+              : lang === "my"
+              ? `${formatPhoneDisplay(phoneInput)} သို့ ပို့ထားသော ကုဒ်ကို ထည့်ပါ (စမ်းသပ်ရန် 1234)`
+              : `Code sent to ${formatPhoneDisplay(phoneInput)} (Demo code: 1234)`}
+          </p>
+
+          {/* Quick Demo Patient Switcher for Testing */}
+          {onboardingStep === "phone" && (
+            <div className="mt-4 rounded-2xl border-2 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-3.5">
+              <span className="block text-xs font-extrabold uppercase tracking-wider text-blue-950">
+                {lang === "my"
+                  ? "စမ်းသပ်ရန် လူနာအကောင့်များ (တစ်ချက်နှိပ်ရုံဖြင့် ဝင်နိုင်သည်) -"
+                  : "Quick Demo Patient Accounts (Tap to Fill):"}
+              </span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {patients.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setPhoneInput(p.phone);
+                      setNameInput(p.name);
+                      setAuthError("");
+                    }}
+                    className={`rounded-xl border-2 px-3 py-2 text-left text-xs font-extrabold transition-all ${
+                      phoneInput === p.phone
+                        ? "border-blue-700 bg-blue-700 text-white shadow-sm"
+                        : "border-slate-300 bg-white text-slate-900 hover:bg-slate-100"
+                    }`}
+                  >
+                    <div>{p.name}</div>
+                    <div className="opacity-85">
+                      {p.phone} • {formatCurrency(p.credit_points, lang)}
+                    </div>
+                  </button>
+                ))}
               </div>
+            </div>
+          )}
+
+          <form
+            onSubmit={
+              onboardingStep === "phone" ? handleRequestOtp : handleVerifyOtp
+            }
+            className="mt-5 space-y-5"
+          >
+            {/* High-Contrast Display Screen */}
+            <div>
+              <label className="mb-2 block text-base font-extrabold text-slate-900">
+                {onboardingStep === "phone"
+                  ? lang === "my"
+                    ? "မိုဘိုင်းဖုန်းနံပါတ်"
+                    : "Mobile Number"
+                  : lang === "my"
+                  ? "ဂဏန်း ၄ လုံး OTP ကုဒ်"
+                  : "4-Digit OTP Code"}
+              </label>
+              <div className="flex min-h-[68px] items-center justify-between rounded-2xl border-2 border-slate-900 bg-slate-50 px-5 py-3 shadow-inner">
+                <div className="flex items-center gap-3">
+                  <Phone className="h-7 w-7 text-clinic-primary" />
+                  <span className="text-2xl font-black tracking-wider text-slate-950 sm:text-3xl">
+                    {onboardingStep === "phone"
+                      ? phoneInput || "09..."
+                      : otpInput || "••••"}
+                  </span>
+                </div>
+                {onboardingStep === "otp" && (
+                  <span className="rounded-xl bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-900">
+                    Demo: 1234
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Optional Patient Name Input for New Users */}
+            {onboardingStep === "phone" && (
               <div>
-                <CardTitle className="text-2xl sm:text-3xl font-black text-white">
-                  {authStep === "PHONE"
-                    ? "Patient Sign In"
-                    : "Enter SMS Code"}
-                </CardTitle>
-                <p className="text-base font-semibold text-slate-200">
-                  {authStep === "PHONE"
-                    ? "Enter your phone number to book or check your queue"
-                    : `We sent a 4-digit code to ${formatPhoneDisplay(phoneInput)}`}
+                <label className="mb-1.5 block text-sm font-extrabold text-slate-800">
+                  {lang === "my"
+                    ? "လူနာအမည် (အကောင့်အသစ်ဖြစ်ပါက ထည့်သွင်းနိုင်သည်)"
+                    : "Patient Name (Optional for new patients)"}
+                </label>
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  placeholder={
+                    lang === "my"
+                      ? "ဥပမာ - ဦးအောင်မင်း / ဒေါ်စုစု"
+                      : "e.g., U Aung Min / Daw Su Su"
+                  }
+                  className="min-h-[52px] w-full rounded-2xl border-2 border-slate-300 bg-white px-4 text-lg font-bold text-slate-950 focus:border-clinic-primary focus:outline-none"
+                />
+              </div>
+            )}
+
+            {/* Elderly-Friendly Tactile Dial Pad (60px height buttons) */}
+            <div className="grid grid-cols-3 gap-3">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
+                <button
+                  key={digit}
+                  type="button"
+                  onClick={() => handlePhoneKeyPress(digit)}
+                  className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-gradient-to-b from-white to-slate-100 text-2xl font-black text-slate-950 shadow-sm active:scale-95 active:bg-slate-200"
+                >
+                  {digit}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onboardingStep === "phone") setPhoneInput("");
+                  else setOtpInput("");
+                }}
+                className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-slate-100 text-sm font-extrabold text-slate-800 active:scale-95"
+              >
+                {lang === "my" ? "အကုန်ဖျက်" : "CLEAR"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePhoneKeyPress("0")}
+                className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-gradient-to-b from-white to-slate-100 text-2xl font-black text-slate-950 shadow-sm active:scale-95 active:bg-slate-200"
+              >
+                0
+              </button>
+              <button
+                type="button"
+                onClick={handleBackspace}
+                aria-label="Delete last digit"
+                className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-slate-100 text-slate-900 active:scale-95"
+              >
+                <Delete className="h-6 w-6" />
+              </button>
+            </div>
+
+            {authError && (
+              <div className="rounded-2xl border-2 border-red-700 bg-red-50 p-4 text-base font-extrabold text-red-900">
+                {authError}
+              </div>
+            )}
+
+            {/* Single Primary CTA */}
+            <button
+              type="submit"
+              disabled={isSendingOtp}
+              className="flex min-h-[64px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-6 py-4 text-xl font-black text-white shadow-lg transition-all hover:opacity-95 active:scale-[0.99]"
+            >
+              <span>
+                {onboardingStep === "phone"
+                  ? lang === "my"
+                    ? "OTP ကုဒ် ရယူမည်"
+                    : "Send SMS OTP Code"
+                  : lang === "my"
+                  ? "အတည်ပြုပြီး ဆေးခန်းစနစ်သို့ ဝင်မည်"
+                  : "Verify & Sign In Now"}
+              </span>
+              <ArrowRight className="h-6 w-6" />
+            </button>
+
+            {onboardingStep === "otp" && (
+              <button
+                type="button"
+                onClick={() => setOnboardingStep("phone")}
+                className="flex min-h-[50px] w-full items-center justify-center rounded-2xl border-2 border-slate-300 bg-white text-base font-extrabold text-slate-800 hover:bg-slate-100"
+              >
+                {lang === "my"
+                  ? "← ဖုန်းနံပါတ် ပြန်ပြင်မည်"
+                  : "← Change Phone Number"}
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // 2. LIVE QUEUE TRACKER VIEW (WITH QR CODE, DOCTOR ALERTS & SMART ETA)
+  // ============================================================================
+  if (view === "tracker" && activeBooking) {
+    const doctor = doctors.find((d) => d.id === activeBooking.doctor_id);
+    const currentServing = doctor?.current_queue_number ?? 0;
+    const myQueueNumber = activeBooking.queue_number;
+    const patientsAhead = Math.max(0, myQueueNumber - currentServing);
+    const isMyTurn = myQueueNumber === currentServing;
+    const isApproaching = patientsAhead > 0 && patientsAhead <= 3;
+    const avgMins = doctor?.avg_consult_minutes || 8;
+    const estimatedWaitMinutes =
+      patientsAhead * avgMins + (doctor?.delay_minutes || 0);
+    const ticketCode =
+      activeBooking.ticket_code || `Q-${activeBooking.queue_number}`;
+
+    // Messages for this doctor or this patient
+    const relevantMessages = messages.filter(
+      (m) =>
+        (!m.doctor_id || m.doctor_id === activeBooking.doctor_id) &&
+        (!m.patient_id || m.patient_id === currentPatient.id)
+    );
+
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:py-8">
+        {/* Top Patient Welcome & Status Pill */}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+              {lang === "my" ? "လူနာအမည်" : "Patient"}
+            </p>
+            <h1 className="text-xl font-black text-slate-950">
+              {currentPatient.name}
+            </h1>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {activeBooking.is_priority && (
+              <span className="inline-flex items-center gap-1 rounded-xl bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-950">
+                <Crown className="h-4 w-4 text-amber-600" />
+                {lang === "my" ? "ဦးစားပေး (VIP)" : "Priority VIP"}
+              </span>
+            )}
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-xl border-2 px-3.5 py-1.5 text-sm font-black ${
+                activeBooking.payment_status === "paid"
+                  ? "border-emerald-700 bg-emerald-50 text-emerald-950"
+                  : "border-amber-600 bg-amber-50 text-amber-950"
+              }`}
+            >
+              {activeBooking.payment_status === "paid" ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                  {lang === "my" ? "ငွေပေးချေပြီး (အတည်ပြုပြီး)" : "Paid & Confirmed"}
+                </>
+              ) : (
+                <>
+                  <Clock className="h-4 w-4 text-amber-700" />
+                  {lang === "my"
+                    ? "ငွေလွှဲပြေစာ စစ်ဆေးနေဆဲ"
+                    : "Verifying Payment Receipt"}
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+
+        {/* Doctor Postponed / Delayed Warning Banner */}
+        {doctor && doctor.status !== "available" && (
+          <div
+            className={`mb-5 rounded-3xl border-4 p-5 shadow-md ${
+              doctor.status === "postponed"
+                ? "border-red-700 bg-gradient-to-r from-red-50 to-rose-100 text-red-950"
+                : "border-amber-600 bg-gradient-to-r from-amber-50 to-orange-100 text-amber-950"
+            }`}
+          >
+            <div className="flex items-start gap-3.5">
+              <AlertTriangle className="h-8 w-8 shrink-0" />
+              <div>
+                <h2 className="text-xl font-black">
+                  {doctor.status === "postponed"
+                    ? lang === "my"
+                      ? "ဆရာဝန်ကြီး ယနေ့ ရက်ချိန်း ရွှေ့ဆိုင်းထားပါသည်"
+                      : "Doctor Session Postponed"
+                    : lang === "my"
+                    ? `ဆရာဝန်ကြီး ${doctor.delay_minutes} မိနစ်ခန့် နောက်ကျမည်ဖြစ်ပါသည်`
+                    : `Doctor Delayed by ${doctor.delay_minutes} Minutes`}
+                </h2>
+                <p className="mt-1 text-base font-bold">
+                  {doctor.status === "postponed"
+                    ? lang === "my"
+                      ? `ပြန်လည်ချိန်းဆိုသည့်ရက် - ${
+                          doctor.postponed_to || "ထပ်မံအကြောင်းကြားပါမည်"
+                        }`
+                      : `Rescheduled Date: ${doctor.postponed_to || "TBA"}`
+                    : doctor.status_note ||
+                      (lang === "my"
+                        ? "အရေးပေါ်လူနာ ကြည့်ရှုနေပါသဖြင့် ခေတ္တစောင့်ဆိုင်းပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။"
+                        : "Please wait comfortably; the queue will resume shortly.")}
                 </p>
               </div>
             </div>
-          </CardHeader>
+          </div>
+        )}
 
-          <CardContent className="p-6 space-y-6">
-            {authStep === "PHONE" ? (
-              <form onSubmit={handleSendOtp} className="space-y-6">
-                {/* Patient Name Input */}
-                <div className="space-y-2">
-                  <label
-                    htmlFor="patient-name"
-                    className="block text-lg font-extrabold text-slate-950"
-                  >
-                    Your Full Name
-                  </label>
-                  <Input
-                    id="patient-name"
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="e.g. U Ba Hlaing / Daw Mya Sein"
-                    className="text-xl font-bold h-14 border-2 border-slate-800"
-                  />
-                </div>
+        {/* Smart ETA Approaching / Turn Now Alert Banner */}
+        {(isMyTurn || isApproaching) && (
+          <div
+            className={`mb-6 rounded-3xl border-4 p-5 text-white shadow-xl ${
+              isMyTurn
+                ? "border-emerald-300 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-800"
+                : "border-amber-300 bg-gradient-to-r from-amber-600 via-orange-600 to-amber-800"
+            }`}
+          >
+            <div className="flex items-start gap-4">
+              <Bell className="h-9 w-9 shrink-0 animate-bounce" />
+              <div>
+                <h2 className="text-xl font-black sm:text-2xl">
+                  {isMyTurn
+                    ? lang === "my"
+                      ? "သင့်အလှည့် ရောက်ပါပြီ! အခန်းထဲသို့ ဝင်ရောက်နိုင်ပါပြီ"
+                      : "IT IS YOUR TURN NOW!"
+                    : lang === "my"
+                    ? `သင့်အလှည့် ရောက်ရန် လူနာ (${patientsAhead}) ဦးသာ လိုပါတော့သည်!`
+                    : `YOUR TURN IS APPROACHING (${patientsAhead} Patients Away)`}
+                </h2>
+                <p className="mt-1 text-base font-bold text-white/95 sm:text-lg">
+                  {isMyTurn
+                    ? lang === "my"
+                      ? `ကျေးဇူးပြု၍ အခန်းအမှတ် (${doctor?.room_number}) - ${doctor?.name_my} ထံသို့ ယခုပင် ဝင်ရောက်ပေးပါ။`
+                      : `Please enter Room ${doctor?.room_number} (${doctor?.name}) immediately.`
+                    : lang === "my"
+                    ? `ဆေးခန်းသို့ ကြွရောက်ပေးပါရန်နှင့် အခန်း (${doctor?.room_number}) ရှေ့တွင် အသင့်စောင့်ဆိုင်းပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။`
+                    : `Please proceed to the clinic and wait near Room ${doctor?.room_number}.`}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
-                {/* Large Phone Number Display */}
-                <div className="space-y-2">
-                  <label
-                    htmlFor="phone-display"
-                    className="block text-lg font-extrabold text-slate-950"
-                  >
-                    Your Mobile Phone Number
-                  </label>
-                  <Input
-                    id="phone-display"
-                    type="tel"
-                    value={phoneInput}
-                    onChange={(e) =>
-                      setPhoneInput(e.target.value.replace(/\D/g, ""))
-                    }
-                    placeholder="09xxxxxxxxx"
-                    className="text-3xl font-black tracking-wider text-center h-16 border-2 border-slate-900 bg-slate-50"
-                  />
-                </div>
+        {/* Massive Color-Coded Live Queue Comparison Grid */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Clinic's Current Queue Number */}
+          <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-slate-800 bg-gradient-to-b from-slate-900 to-slate-800 p-6 text-center text-white shadow-lg">
+            <span className="text-sm font-extrabold uppercase tracking-wider text-sky-300">
+              {lang === "my"
+                ? "ယခု ပြသနေသော အလှည့်နံပါတ်"
+                : "Now Serving in Clinic"}
+            </span>
+            <span className="my-2 text-7xl font-black tracking-tighter text-white sm:text-8xl">
+              #{currentServing}
+            </span>
+            <span className="rounded-xl bg-white/15 px-3.5 py-1 text-sm font-bold text-slate-100">
+              {lang === "my"
+                ? `အခန်း (${doctor?.room_number}) • ${doctor?.name_my}`
+                : `Room ${doctor?.room_number} • ${doctor?.name}`}
+            </span>
+          </div>
 
-                {/* Large Touch Keypad for Elderly Patients */}
+          {/* Patient's Assigned Queue Number */}
+          <div
+            className={`flex flex-col items-center justify-center rounded-3xl border-4 p-6 text-center text-white shadow-xl ${
+              isMyTurn
+                ? "border-emerald-300 bg-gradient-to-br from-emerald-600 to-teal-800"
+                : isApproaching
+                ? "border-amber-300 bg-gradient-to-br from-amber-500 to-orange-700"
+                : "border-blue-400 bg-gradient-to-br from-blue-600 via-indigo-700 to-blue-900"
+            }`}
+          >
+            <span className="text-sm font-extrabold uppercase tracking-wider text-white/90">
+              {lang === "my" ? "သင့်အလှည့် နံပါတ်" : "Your Queue Number"}
+            </span>
+            <span className="my-2 text-7xl font-black tracking-tighter sm:text-8xl">
+              #{myQueueNumber}
+            </span>
+            <span className="rounded-xl bg-black/25 px-3.5 py-1 text-sm font-extrabold">
+              {isMyTurn
+                ? lang === "my"
+                  ? "အခန်းအမှတ် " + doctor?.room_number + " သို့ ဝင်ပါ"
+                  : `Enter Room ${doctor?.room_number} Now`
+                : patientsAhead === 0
+                ? lang === "my"
+                  ? "သင့်အလှည့် ပြီးဆုံး/ကျော်သွားပါပြီ"
+                  : "Queue Number Passed"
+                : lang === "my"
+                ? `သင့်ရှေ့တွင် လူနာ (${patientsAhead}) ဦး ကျန်ပါသည်`
+                : `${patientsAhead} patient(s) ahead of you`}
+            </span>
+          </div>
+        </div>
+
+        {/* Doctor & Estimated Wait Card */}
+        <div className="mt-5 rounded-3xl border-2 border-slate-200 bg-white p-6 shadow-md">
+          <div className="flex flex-col justify-between gap-4 border-b-2 border-slate-100 pb-4 sm:flex-row sm:items-center">
+            <div>
+              <span className="text-xs font-extrabold uppercase tracking-wider text-clinic-primary">
+                {lang === "my"
+                  ? doctor?.specialty_my || doctor?.specialty
+                  : doctor?.specialty}
+              </span>
+              <h3 className="text-2xl font-black text-slate-950">
+                {lang === "my" ? doctor?.name_my || doctor?.name : doctor?.name}
+              </h3>
+              <p className="mt-0.5 text-sm font-bold text-slate-600">
+                {lang === "my"
+                  ? `ကြည့်ရှုချိန် - ${doctor?.start_time} မှ ${doctor?.end_time}`
+                  : `Consultation Hours: ${doctor?.start_time} – ${doctor?.end_time}`}
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-2 self-start rounded-2xl bg-gradient-to-r from-blue-700 to-indigo-800 px-4 py-2.5 text-base font-black text-white shadow-sm">
+              <Building2 className="h-5 w-5" />
+              <span>
+                {lang === "my"
+                  ? `အခန်းအမှတ် ${doctor?.room_number}`
+                  : `Room ${doctor?.room_number}`}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex items-center gap-3.5 rounded-2xl bg-slate-50 p-4">
+              <Clock className="h-8 w-8 shrink-0 text-clinic-primary" />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                  {lang === "my"
+                    ? "ခန့်မှန်း စောင့်ဆိုင်းရမည့်အချိန်"
+                    : "Estimated Wait Time"}
+                </p>
+                <p className="text-xl font-black text-slate-950">
+                  {isMyTurn
+                    ? lang === "my"
+                      ? "၀ မိနစ် (ယခုဝင်ပါ)"
+                      : "0 mins (Now Serving)"
+                    : lang === "my"
+                    ? `~ ${estimatedWaitMinutes} မိနစ်ခန့်`
+                    : `~ ${estimatedWaitMinutes} Minutes`}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleEnablePushNotifications}
+              className={`flex min-h-[60px] items-center justify-center gap-2.5 rounded-2xl border-2 px-4 py-3 text-base font-extrabold transition-all ${
+                notificationEnabled
+                  ? "border-emerald-700 bg-emerald-50 text-emerald-950"
+                  : "border-slate-900 bg-slate-900 text-white hover:bg-slate-800"
+              }`}
+            >
+              <Bell className="h-5 w-5" />
+              <span>
+                {notificationEnabled
+                  ? lang === "my"
+                    ? "အသိပေးချက် ဖွင့်ထားပြီး"
+                    : "Push Alerts Active"
+                  : lang === "my"
+                  ? "အလှည့်နီးလျှင် ဖုန်းသတိပေးချက် ဖွင့်မည်"
+                  : "Enable Turn Alerts (FCM)"}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Live Doctor Broadcast & Automated Messages Feed */}
+        <div className="mt-5 rounded-3xl border-2 border-blue-200 bg-gradient-to-br from-blue-50/80 via-white to-indigo-50/80 p-6 shadow-md">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <MessageSquareHeart className="h-6 w-6 text-clinic-primary" />
+              <h3 className="text-lg font-black text-slate-950 sm:text-xl">
+                {lang === "my"
+                  ? "ဆေးခန်းနှင့် ဆရာဝန်ကြီးမှ တိုက်ရိုက် အသိပေးချက်များ"
+                  : "Live Doctor & Clinic Updates"}
+              </h3>
+            </div>
+            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-900">
+              {relevantMessages.length}
+            </span>
+          </div>
+
+          {relevantMessages.length === 0 ? (
+            <p className="text-base font-bold text-slate-600">
+              {lang === "my"
+                ? "လက်ရှိတွင် ထူးခြားသော အသိပေးချက် မရှိသေးပါ။"
+                : "No special announcements right now."}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {relevantMessages.slice(0, 5).map((msg) => (
                 <div
-                  aria-label="Phone Number Keypad"
-                  className="grid grid-cols-3 gap-3"
+                  key={msg.id}
+                  className="rounded-2xl border-2 border-blue-200 bg-white p-4 shadow-sm"
                 >
-                  {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => handlePhoneDigit(num)}
-                      className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-white text-2xl font-black text-slate-950 shadow-sm hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-clinic-primary/40"
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setPhoneInput("")}
-                    className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-red-300 bg-red-50 text-base font-extrabold text-red-900 hover:bg-red-100"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePhoneDigit("0")}
-                    className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-white text-2xl font-black text-slate-950 shadow-sm hover:bg-slate-100 active:bg-slate-200"
-                  >
-                    0
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePhoneBackspace}
-                    aria-label="Delete last digit"
-                    className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-slate-400 bg-slate-100 text-slate-950 hover:bg-slate-200"
-                  >
-                    <Delete className="h-7 w-7" />
-                  </button>
-                </div>
-
-                {authError && (
-                  <div className="rounded-xl border-2 border-red-700 bg-red-50 p-4 text-lg font-bold text-red-900">
-                    {authError}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-base font-black text-slate-950">
+                      {lang === "my" ? msg.title_my : msg.title_en}
+                    </span>
+                    <span className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-700">
+                      {new Date(msg.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
                   </div>
-                )}
-
-                <Button type="submit" size="xl" className="w-full">
-                  Send SMS Verification Code
-                </Button>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyOtp} className="space-y-6">
-                {/* SMS OTP Mock Notification Banner */}
-                <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 p-4 text-emerald-950">
-                  <div className="flex items-center gap-2 font-extrabold text-lg">
-                    <ShieldCheck className="h-6 w-6 text-emerald-700 shrink-0" />
-                    <span>SMS Verification Code (Demo Mode): 1234</span>
-                  </div>
-                  <p className="mt-1 text-base font-semibold text-emerald-900">
-                    We have pre-filled your 4-digit SMS code below so you can
-                    sign in with one tap.
+                  <p className="mt-1.5 text-base font-medium leading-relaxed text-slate-800">
+                    {lang === "my" ? msg.body_my : msg.body_en}
                   </p>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-                {/* Large 4-Digit OTP Display */}
-                <div className="space-y-2">
-                  <label
-                    htmlFor="otp-input"
-                    className="block text-lg font-extrabold text-slate-950"
-                  >
-                    4-Digit Verification Code
-                  </label>
-                  <Input
-                    id="otp-input"
-                    type="text"
-                    maxLength={4}
-                    value={otpInput}
-                    onChange={(e) =>
-                      setOtpInput(e.target.value.replace(/\D/g, ""))
-                    }
-                    className="text-4xl font-black tracking-[0.5em] text-center h-20 border-2 border-slate-900 bg-slate-50"
-                  />
+        {/* Digital QR Code Queue Ticket Card */}
+        <div className="mt-5 rounded-3xl border-2 border-slate-300 bg-white p-6 shadow-md">
+          <div className="flex flex-col items-center gap-5 sm:flex-row">
+            <div className="flex shrink-0 flex-col items-center rounded-2xl border-2 border-slate-200 bg-slate-50 p-3">
+              {fallbackQrUrl ? (
+                <img
+                  src={fallbackQrUrl}
+                  alt={`QR Ticket ${ticketCode}`}
+                  className="h-44 w-44 rounded-xl object-contain"
+                />
+              ) : (
+                <div className="flex h-44 w-44 items-center justify-center">
+                  <QrCode className="h-16 w-16 text-slate-400" />
                 </div>
+              )}
+              <span className="mt-1.5 font-mono text-sm font-black text-slate-900">
+                {ticketCode}
+              </span>
+            </div>
 
-                {/* Keypad for OTP */}
-                <div className="grid grid-cols-3 gap-3">
-                  {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => handleOtpDigit(num)}
-                      className="flex min-h-[56px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-white text-2xl font-black text-slate-950 hover:bg-slate-100"
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setOtpInput("1234")}
-                    className="flex min-h-[56px] items-center justify-center rounded-2xl border-2 border-emerald-700 bg-emerald-50 text-sm font-extrabold text-emerald-950"
-                  >
-                    Auto 1234
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOtpDigit("0")}
-                    className="flex min-h-[56px] items-center justify-center rounded-2xl border-2 border-slate-300 bg-white text-2xl font-black text-slate-950 hover:bg-slate-100"
-                  >
-                    0
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOtpInput((prev) => prev.slice(0, -1))}
-                    className="flex min-h-[56px] items-center justify-center rounded-2xl border-2 border-slate-400 bg-slate-100 text-slate-950"
-                  >
-                    <Delete className="h-6 w-6" />
-                  </button>
-                </div>
+            <div className="flex-1 text-center sm:text-left">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 px-3 py-1 text-xs font-black text-indigo-950">
+                <QrCode className="h-3.5 w-3.5" />
+                <span>
+                  {lang === "my"
+                    ? "ဒစ်ဂျစ်တယ် QR အလှည့်လက်မှတ်"
+                    : "Digital QR Queue Pass"}
+                </span>
+              </div>
+              <h3 className="mt-2 text-xl font-black text-slate-950">
+                {lang === "my"
+                  ? "ဆေးခန်းရောက်လျှင် ဤ QR ကုဒ်ကို ပြသပါ"
+                  : "Show This QR Ticket at Reception"}
+              </h3>
+              <p className="mt-1 text-base font-medium text-slate-700">
+                {lang === "my"
+                  ? "ဤ QR ပုံကို ဖုန်းထဲတွင် သိမ်းဆည်းထားနိုင်သလို မိသားစုဝင်များထံ Viber / Messenger မှတစ်ဆင့် ပေးပို့ထားနိုင်ပါသည်။"
+                  : "Download this QR pass to your phone gallery or share the live ticket link with family members."}
+              </p>
 
-                {authError && (
-                  <div className="rounded-xl border-2 border-red-700 bg-red-50 p-4 text-lg font-bold text-red-900">
-                    {authError}
-                  </div>
+              <div className="mt-4 flex flex-wrap justify-center gap-2.5 sm:justify-start">
+                {fallbackQrUrl && (
+                  <a
+                    href={fallbackQrUrl}
+                    download={`Clinic-Ticket-${ticketCode}.png`}
+                    className="inline-flex min-h-[48px] items-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-800 px-4 py-2.5 text-sm font-black text-white shadow-sm hover:opacity-95"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>
+                      {lang === "my" ? "QR ပုံ သိမ်းဆည်းမည်" : "Download QR"}
+                    </span>
+                  </a>
                 )}
-
-                <div className="flex flex-col gap-3">
-                  <Button
-                    type="submit"
-                    variant="success"
-                    size="xl"
-                    className="w-full"
-                    disabled={isSubmitting}
-                  >
-                    <CheckCircle2 className="mr-2 h-7 w-7" />
-                    Verify & Enter Clinic Portal
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="default"
-                    onClick={() => setAuthStep("PHONE")}
-                    className="w-full"
-                  >
-                    <ArrowLeft className="mr-2 h-5 w-5" />
-                    Change Phone Number
-                  </Button>
-                </div>
-              </form>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // SCREEN 4: LIVE QUEUE TRACKER (MASSIVE ELDERLY-FRIENDLY REALTIME DISPLAY)
-  // ============================================================================
-  if (screen === "LIVE_QUEUE_TRACKER" && trackedBooking && trackedDoctor) {
-    const myNumber = trackedBooking.queue_number;
-    const currentNumber = trackedDoctor.current_queue_number;
-    const peopleAhead = Math.max(0, myNumber - currentNumber);
-
-    const isMyTurn =
-      trackedBooking.status === "in_progress" || currentNumber === myNumber;
-    const isAlmostMyTurn = !isMyTurn && peopleAhead > 0 && peopleAhead <= 2;
-    const isPassed = currentNumber > myNumber;
-
-    // Color-coded status banner (WCAG AAA high contrast)
-    const statusBannerClass = isMyTurn
-      ? "bg-emerald-700 text-white border-emerald-950"
-      : isAlmostMyTurn
-      ? "bg-amber-400 text-slate-950 border-slate-950"
-      : "bg-clinic-primary text-white border-slate-900";
-
-    return (
-      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 space-y-6">
-        {/* Top Action Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            size="default"
-            onClick={() => setScreen("DOCTORS_HOME")}
-          >
-            <ArrowLeft className="mr-2 h-5 w-5" />
-            All Doctors Today
-          </Button>
-          <Badge
-            variant={
-              trackedBooking.payment_status === "paid" ? "success" : "warning"
-            }
-            className="text-base px-4 py-2"
-          >
-            {trackedBooking.payment_status === "paid"
-              ? "✓ Payment Confirmed"
-              : "⏳ Receipt Under Reception Review"}
-          </Badge>
+                <Link
+                  href={`/ticket/${activeBooking.id}`}
+                  className="inline-flex min-h-[48px] items-center gap-2 rounded-xl border-2 border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-900 hover:bg-slate-100"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  <span>
+                    {lang === "my"
+                      ? "လက်မှတ်စာမျက်နှာ သီးသန့်ဖွင့်မည်"
+                      : "Open Shareable Ticket"}
+                  </span>
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Massive Live Queue Status Card */}
-        <div
-          className={`rounded-3xl border-4 p-6 sm:p-8 shadow-xl transition-colors ${statusBannerClass}`}
-        >
-          <div className="flex items-center justify-between gap-3 border-b-2 border-current/20 pb-4">
+        {/* Smart Credit Cancellation Option (No-Refund Policy -> Credit Points) */}
+        <div className="mt-5 rounded-3xl border-2 border-slate-200 bg-slate-50 p-5">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
-              <p className="text-sm font-black uppercase tracking-widest opacity-90">
-                Live Consultation Queue
+              <h4 className="text-base font-black text-slate-900">
+                {lang === "my"
+                  ? "ယနေ့ မလာရောက်နိုင်တော့ပါက ရက်ချိန်းပယ်ဖျက်နိုင်ပါသည်"
+                  : "Need to Cancel Today's Visit?"}
+              </h4>
+              <p className="mt-0.5 text-sm font-bold text-slate-600">
+                {lang === "my"
+                  ? "ပေးသွင်းထားသော စမ်းသပ်ခကို နောက်တစ်ကြိမ် ချက်ချင်းပြန်သုံးနိုင်ရန် Credit Points အဖြစ် အပြည့်အဝ ပြောင်းလဲပေးပါမည်။"
+                  : "100% of your paid fee is converted into Credit Points for your next visit."}
               </p>
-              <h1 className="text-2xl sm:text-3xl font-black mt-1">
-                {trackedDoctor.name}
-              </h1>
-              <p className="flex items-center gap-1.5 text-lg font-bold mt-1 opacity-95">
-                <MapPin className="h-5 w-5 shrink-0" />
-                {trackedDoctor.room_number}
-              </p>
             </div>
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
-              <BellRing className="h-8 w-8 animate-pulse" />
-            </div>
-          </div>
-
-          {/* Two Massive Numbers Side by Side */}
-          <div className="my-8 grid grid-cols-1 gap-6 sm:grid-cols-2">
-            {/* Patient's Queue Number */}
-            <div className="rounded-2xl bg-white p-6 text-center text-slate-950 shadow-lg border-2 border-slate-900">
-              <span className="block text-base font-extrabold uppercase tracking-wider text-slate-700">
-                Your Queue Number
+            <button
+              type="button"
+              onClick={() => handlePatientCancelBooking(activeBooking.id)}
+              className="inline-flex min-h-[48px] shrink-0 items-center justify-center gap-2 rounded-xl border-2 border-red-700 bg-white px-4 py-2.5 text-sm font-black text-red-800 hover:bg-red-50"
+            >
+              <XCircle className="h-4 w-4" />
+              <span>
+                {lang === "my"
+                  ? "ရက်ချိန်းပယ်ဖျက်ပြီး ပွိုင့်ပြန်ယူမည်"
+                  : "Cancel & Convert to Credit"}
               </span>
-              <span className="mt-2 block text-6xl sm:text-7xl font-black tracking-tight text-slate-950">
-                #{myNumber}
-              </span>
-              <span className="mt-2 inline-block rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-800">
-                Patient: {currentPatient.name}
-              </span>
-            </div>
-
-            {/* Doctor's Current Queue Number */}
-            <div className="rounded-2xl bg-slate-950 p-6 text-center text-white shadow-lg border-2 border-white/20">
-              <span className="block text-base font-extrabold uppercase tracking-wider text-slate-300">
-                Now Serving Number
-              </span>
-              <span className="mt-2 block text-6xl sm:text-7xl font-black tracking-tight text-emerald-400">
-                #{currentNumber}
-              </span>
-              <span className="mt-2 inline-block rounded-full bg-white/15 px-3 py-1 text-sm font-bold text-white">
-                Updates Automatically
-              </span>
-            </div>
-          </div>
-
-          {/* Plain-Language Turn Guidance for Elderly Patients */}
-          <div className="rounded-2xl bg-black/15 p-5 text-center">
-            {isMyTurn ? (
-              <div className="space-y-1">
-                <p className="text-2xl sm:text-3xl font-black">
-                  IT IS YOUR TURN NOW!
-                </p>
-                <p className="text-lg sm:text-xl font-bold">
-                  Please walk into {trackedDoctor.room_number} now.
-                </p>
-              </div>
-            ) : isPassed ? (
-              <div className="space-y-1">
-                <p className="text-2xl font-black">
-                  Your Queue Number #{myNumber} Has Been Called
-                </p>
-                <p className="text-lg font-bold">
-                  Please check with the Reception Desk if you missed your turn.
-                </p>
-              </div>
-            ) : isAlmostMyTurn ? (
-              <div className="space-y-1">
-                <p className="text-2xl sm:text-3xl font-black">
-                  PLEASE GET READY! ({peopleAhead}{" "}
-                  {peopleAhead === 1 ? "Patient" : "Patients"} Ahead)
-                </p>
-                <p className="text-lg font-bold">
-                  Please sit near {trackedDoctor.room_number}. You will be
-                  called very soon.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <p className="text-2xl sm:text-3xl font-black">
-                  {peopleAhead} Patients Ahead of You
-                </p>
-                <p className="text-lg font-bold">
-                  Estimated wait: ~{peopleAhead * 8} minutes. We will alert your
-                  phone when you are within 3 turns.
-                </p>
-              </div>
-            )}
+            </button>
           </div>
         </div>
-
-        {/* Helpful Info Footer */}
-        <Card className="border-2 border-slate-300">
-          <CardContent className="p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <p className="text-lg font-extrabold text-slate-950">
-                Need Assistance at the Clinic?
-              </p>
-              <p className="text-base font-medium text-slate-700">
-                Show this screen to our Reception Desk or call{" "}
-                <span className="font-bold text-slate-950">
-                  {CLINIC_CONFIG.supportPhone}
-                </span>
-              </p>
-            </div>
-            <Button
-              variant="secondary"
-              onClick={() => setScreen("DOCTORS_HOME")}
-            >
-              Book Another Specialist
-            </Button>
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
   // ============================================================================
-  // SCREEN 3: SIMPLE STEP-BY-STEP BOOKING & CHECKOUT WIZARD
+  // 3. PRE-PAID CHECKOUT WIZARD (1-CLICK CREDIT POINTS OR KPAY/WAVEPAY/AYAPAY)
   // ============================================================================
-  if (screen === "BOOKING_CHECKOUT" && selectedDoctor) {
-    const fee = selectedDoctor.consultation_fee;
-    const hasEnoughPoints = currentPatient.credit_points >= fee;
-    const doctorBookingsToday = bookings.filter(
-      (b) => b.doctor_id === selectedDoctor.id
-    );
-    const nextQueueNum =
-      doctorBookingsToday.reduce(
-        (max, b) => Math.max(max, b.queue_number),
-        selectedDoctor.current_queue_number
-      ) + 1;
+  if (view === "checkout" && selectedDoctor) {
+    const canUseCredits =
+      currentPatient.credit_points >= selectedDoctor.consultation_fee;
+    const selectedAccount =
+      paymentMethod === "kpay"
+        ? CLINIC_CONFIG.paymentAccounts.kpay
+        : paymentMethod === "wavepay"
+        ? CLINIC_CONFIG.paymentAccounts.wavepay
+        : CLINIC_CONFIG.paymentAccounts.ayapay;
 
     return (
-      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 space-y-6">
-        <Button
-          variant="outline"
-          size="default"
-          onClick={() => setScreen("DOCTORS_HOME")}
+      <div className="mx-auto max-w-xl px-4 py-6 sm:py-8">
+        <button
+          type="button"
+          onClick={() => setView("doctors")}
+          className="mb-5 inline-flex min-h-[48px] items-center gap-2 rounded-2xl border-2 border-slate-300 bg-white px-4 py-2 text-base font-extrabold text-slate-900 shadow-sm hover:bg-slate-100"
         >
-          <ArrowLeft className="mr-2 h-5 w-5" />
-          Back to Doctor List
-        </Button>
+          <ArrowLeft className="h-5 w-5" />
+          <span>
+            {lang === "my"
+              ? "ဆရာဝန်စာရင်းသို့ ပြန်သွားမည်"
+              : "Back to Doctors List"}
+          </span>
+        </button>
 
-        <Card className="border-2 border-slate-900 shadow-lg">
-          <CardHeader className="border-b-2 border-slate-200 bg-slate-50">
-            <Badge className="w-fit mb-1 text-sm">
-              Step 2 of 2 • Confirm Appointment
-            </Badge>
-            <CardTitle className="text-2xl sm:text-3xl font-black text-slate-950">
-              {selectedDoctor.name}
-            </CardTitle>
-            <p className="text-lg font-bold text-slate-700">
-              {selectedDoctor.specialty} • {selectedDoctor.room_number}
+        <div className="overflow-hidden rounded-3xl border-2 border-slate-200 bg-white shadow-xl">
+          {/* Gradient Header */}
+          <div className="bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 p-6 text-white">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-sky-300">
+              {lang === "my"
+                ? "အဆင့် (၂) • အလှည့်နံပါတ် အတည်ပြုရယူရန်"
+                : "Step 2 • Secure Your Queue Number"}
+            </span>
+            <h1 className="mt-1 text-2xl font-black sm:text-3xl">
+              {lang === "my"
+                ? selectedDoctor.name_my || selectedDoctor.name
+                : selectedDoctor.name}
+            </h1>
+            <p className="mt-1 text-base font-bold text-blue-100">
+              {lang === "my"
+                ? `${selectedDoctor.specialty_my} • အခန်း (${selectedDoctor.room_number})`
+                : `${selectedDoctor.specialty} • Room ${selectedDoctor.room_number}`}
             </p>
-          </CardHeader>
-
-          <CardContent className="p-6 space-y-6">
-            {/* Summary Box */}
-            <div className="grid grid-cols-2 gap-4 rounded-2xl border-2 border-slate-300 bg-slate-50 p-4">
-              <div>
-                <span className="block text-sm font-bold uppercase text-slate-600">
-                  Your Queue Ticket
-                </span>
-                <span className="text-3xl font-black text-clinic-primary">
-                  #{nextQueueNum}
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="block text-sm font-bold uppercase text-slate-600">
-                  Consultation Fee
-                </span>
-                <span className="text-2xl sm:text-3xl font-black text-slate-950">
-                  {formatCurrency(fee)}
-                </span>
-              </div>
+            <div className="mt-4 flex items-center justify-between rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+              <span className="text-base font-extrabold">
+                {lang === "my" ? "ကြိုတင်စမ်းသပ်ခ" : "Consultation Fee"}
+              </span>
+              <span className="text-2xl font-black text-emerald-300">
+                {formatCurrency(selectedDoctor.consultation_fee, lang)}
+              </span>
             </div>
+          </div>
 
-            {/* 1-CLICK CREDIT POINTS CHECKOUT (PRIMARY OPTION FOR RETURNING/REFUNDED PATIENTS) */}
+          <div className="p-6 sm:p-8">
+            <h2 className="mb-3 text-lg font-black text-slate-950">
+              {lang === "my"
+                ? "ငွေပေးချေမည့် နည်းလမ်းကို ရွေးချယ်ပါ"
+                : "Select Payment Method"}
+            </h2>
+
             <div className="space-y-3">
-              <h2 className="text-xl font-black text-slate-950">
-                Choose How You Want to Pay
-              </h2>
-
-              <div
-                onClick={() =>
-                  hasEnoughPoints && setPaymentMethod("credit_points")
-                }
-                className={`cursor-pointer rounded-2xl border-2 p-5 transition-all ${
+              {/* OPTION A: 1-Click Credit Points */}
+              <button
+                type="button"
+                onClick={() => setPaymentMethod("credit_points")}
+                className={`flex min-h-[76px] w-full items-center justify-between rounded-2xl border-2 p-4 text-left transition-all ${
                   paymentMethod === "credit_points"
-                    ? "border-emerald-700 bg-emerald-50 ring-4 ring-emerald-600/20"
+                    ? "border-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 ring-4 ring-emerald-600/20"
                     : "border-slate-300 bg-white hover:bg-slate-50"
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <Wallet className="h-7 w-7 text-emerald-700 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="block text-xl font-black text-slate-950">
-                        Use My Clinic Credit Points (1-Click Instant)
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-700 text-white">
+                    <Sparkles className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-lg font-black text-slate-950">
+                        {lang === "my"
+                          ? "၁-ချက်နှိပ် Credit Points ဖြင့် ပေးချေမည်"
+                          : "1-Click Credit Points"}
                       </span>
-                      <span className="block text-base font-bold text-emerald-900 mt-1">
-                        Your Available Balance:{" "}
-                        {formatCurrency(currentPatient.credit_points)}
-                      </span>
+                      {canUseCredits && (
+                        <span className="rounded-lg bg-emerald-700 px-2 py-0.5 text-xs font-black text-white">
+                          {lang === "my" ? "အမြန်ဆုံး" : "INSTANT"}
+                        </span>
+                      )}
                     </div>
+                    <p className="text-sm font-bold text-slate-700">
+                      {lang === "my"
+                        ? `သင့်လက်ကျန်ပွိုင့် - ${formatCurrency(
+                            currentPatient.credit_points,
+                            "my"
+                          )}`
+                        : `Available Balance: ${formatCurrency(
+                            currentPatient.credit_points,
+                            "en"
+                          )}`}
+                    </p>
                   </div>
-                  <Badge variant={hasEnoughPoints ? "success" : "secondary"}>
-                    {hasEnoughPoints ? "Fastest" : "Low Balance"}
-                  </Badge>
                 </div>
+                <div
+                  className={`h-6 w-6 shrink-0 rounded-full border-2 ${
+                    paymentMethod === "credit_points"
+                      ? "border-emerald-700 bg-emerald-700"
+                      : "border-slate-400"
+                  }`}
+                />
+              </button>
 
-                {!hasEnoughPoints && (
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
-                    <span className="text-sm font-bold text-slate-700">
-                      Need {formatCurrency(fee - currentPatient.credit_points)}{" "}
-                      more points for 1-click checkout.
-                    </span>
-                    <Button
+              {/* OPTION B: Mobile Wallet Transfers (KBZPay, WavePay, AYA Pay) */}
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                {(["kpay", "wavepay", "ayapay"] as const).map((method) => {
+                  const labels = {
+                    kpay: {
+                      title: "KBZPay (KPay)",
+                      color: "from-blue-600 to-blue-800",
+                    },
+                    wavepay: {
+                      title: "WavePay",
+                      color: "from-amber-500 to-yellow-600",
+                    },
+                    ayapay: {
+                      title: "AYA Pay",
+                      color: "from-rose-600 to-red-800",
+                    },
+                  }[method];
+
+                  const isSelected = paymentMethod === method;
+                  return (
+                    <button
+                      key={method}
                       type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        addDemoCreditPoints(15000);
-                        setPaymentMethod("credit_points");
-                      }}
+                      onClick={() => setPaymentMethod(method)}
+                      className={`flex min-h-[64px] flex-col items-center justify-center rounded-2xl border-2 p-3 text-center transition-all ${
+                        isSelected
+                          ? "border-blue-700 bg-blue-50 ring-4 ring-blue-600/20"
+                          : "border-slate-300 bg-white hover:bg-slate-50"
+                      }`}
                     >
-                      + Add 15,000 Demo Points
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* KPay & WavePay Selection Buttons */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("kpay")}
-                  className={`flex min-h-[64px] items-center justify-between rounded-2xl border-2 p-4 text-left transition-all ${
-                    paymentMethod === "kpay"
-                      ? "border-clinic-primary bg-clinic-light ring-4 ring-clinic-primary/20"
-                      : "border-slate-300 bg-white hover:bg-slate-50"
-                  }`}
-                >
-                  <div>
-                    <span className="block text-lg font-black text-slate-950">
-                      KBZPay (KPay)
-                    </span>
-                    <span className="text-sm font-bold text-slate-700">
-                      Upload transfer screenshot
-                    </span>
-                  </div>
-                  <CreditCard className="h-6 w-6 text-clinic-primary" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("wavepay")}
-                  className={`flex min-h-[64px] items-center justify-between rounded-2xl border-2 p-4 text-left transition-all ${
-                    paymentMethod === "wavepay"
-                      ? "border-clinic-primary bg-clinic-light ring-4 ring-clinic-primary/20"
-                      : "border-slate-300 bg-white hover:bg-slate-50"
-                  }`}
-                >
-                  <div>
-                    <span className="block text-lg font-black text-slate-950">
-                      WavePay
-                    </span>
-                    <span className="text-sm font-bold text-slate-700">
-                      Upload transfer screenshot
-                    </span>
-                  </div>
-                  <CreditCard className="h-6 w-6 text-clinic-primary" />
-                </button>
+                      <span
+                        className={`inline-block rounded-lg bg-gradient-to-r ${labels.color} px-2.5 py-1 text-xs font-black text-white`}
+                      >
+                        {labels.title}
+                      </span>
+                      <span className="mt-1 text-xs font-bold text-slate-700">
+                        {lang === "my" ? "ပြေစာပုံတင်ရန်" : "Upload Slip"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* KPay / WavePay Transfer Details & Receipt Uploader */}
-            {(paymentMethod === "kpay" || paymentMethod === "wavepay") && (
-              <div className="rounded-2xl border-2 border-slate-300 bg-slate-50 p-5 space-y-4">
-                <div className="space-y-1">
-                  <p className="text-sm font-extrabold uppercase tracking-wider text-slate-600">
-                    Step A: Transfer {formatCurrency(fee)} to {CLINIC_NAME}
+            {/* Dynamic Payment Instructions */}
+            {paymentMethod === "credit_points" ? (
+              <div className="mt-5 rounded-2xl border-2 border-emerald-200 bg-emerald-50/70 p-4">
+                {canUseCredits ? (
+                  <p className="text-base font-bold text-emerald-950">
+                    {lang === "my"
+                      ? `ပြေစာပုံ တင်ရန်မလိုပါ။ သင့် Credit Points မှ ${formatCurrency(
+                          selectedDoctor.consultation_fee,
+                          "my"
+                        )} နှုတ်ယူပြီး ချက်ချင်း အလှည့်နံပါတ် ရရှိပါမည်။`
+                      : `No screenshot needed! ${formatCurrency(
+                          selectedDoctor.consultation_fee,
+                          "en"
+                        )} will be deducted from your Credit Points immediately.`}
                   </p>
-                  <p className="text-2xl font-black text-slate-950">
-                    {paymentMethod === "kpay"
-                      ? CLINIC_CONFIG.paymentAccounts.kpay.provider
-                      : CLINIC_CONFIG.paymentAccounts.wavepay.provider}
-                    :{" "}
-                    <span className="text-clinic-primary">
-                      {CLINIC_CONFIG.paymentAccounts.kpay.accountNumber}
-                    </span>
-                  </p>
-                  <p className="text-base font-bold text-slate-700">
-                    Account Name:{" "}
-                    {CLINIC_CONFIG.paymentAccounts.kpay.accountName}
-                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-base font-bold text-amber-950">
+                      {lang === "my"
+                        ? "သင့်တွင် Credit Points မလုံလောက်သေးပါ။ KPay / WavePay / AYA Pay ရွေးချယ်ပါ (သို့မဟုတ် စမ်းသပ်ရန် အောက်ပါခလုတ်ဖြင့် ပွိုင့်ဖြည့်ပါ)။"
+                        : "Not enough Credit Points. Choose KPay/WavePay/AYA Pay above, or top up demo points below to test 1-click checkout:"}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => addDemoCreditPoints(15000)}
+                      className="inline-flex min-h-[48px] items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-black text-white hover:bg-emerald-800"
+                    >
+                      <Wallet className="h-4 w-4" />
+                      <span>
+                        {lang === "my"
+                          ? "+ ၁၅,၀၀၀ ကျပ် စမ်းသပ်ပွိုင့် ဖြည့်မည်"
+                          : "+ Add 15,000 MMK Demo Credit Points"}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4 rounded-2xl border-2 border-slate-200 bg-slate-50 p-5">
+                <div className="rounded-2xl border-2 border-blue-200 bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                        {selectedAccount.provider} Account
+                      </span>
+                      <p className="text-xl font-black text-slate-950">
+                        {selectedAccount.accountNumber}
+                      </p>
+                      <p className="text-sm font-bold text-slate-700">
+                        {selectedAccount.accountName}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyAccountPhone(selectedAccount.accountNumber)
+                      }
+                      className="inline-flex min-h-[48px] items-center gap-1.5 rounded-xl border-2 border-blue-700 bg-blue-50 px-3.5 py-2 text-sm font-black text-blue-900 hover:bg-blue-100"
+                    >
+                      {copiedPhone ? (
+                        <>
+                          <Check className="h-4 w-4 text-emerald-700" />
+                          <span>
+                            {lang === "my" ? "ကူးယူပြီး" : "Copied!"}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4" />
+                          <span>
+                            {lang === "my" ? "ဖုန်းနံပါတ် ကူးမည်" : "Copy Number"}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label
-                    htmlFor="receipt-upload"
-                    className="block text-base font-extrabold text-slate-950"
-                  >
-                    Step B: Upload Your Payment Receipt Screenshot
+                <div>
+                  <label className="mb-2 block text-base font-extrabold text-slate-900">
+                    {lang === "my"
+                      ? "ငွေလွှဲပြေစာ (Screenshot) ပုံ တင်ပေးပါ"
+                      : "Upload Transfer Screenshot"}
                   </label>
-                  <label
-                    htmlFor="receipt-upload"
-                    className="flex min-h-[72px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-900 bg-white p-4 text-center hover:bg-slate-100"
-                  >
-                    <Upload className="h-7 w-7 text-clinic-primary mb-1" />
-                    <span className="text-lg font-extrabold text-slate-950">
+                  <label className="flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-600 bg-white p-4 text-center hover:bg-blue-50/40">
+                    <Upload className="mb-2 h-8 w-8 text-clinic-primary" />
+                    <span className="text-base font-black text-slate-950">
                       {receiptFile
-                        ? `Selected: ${receiptFile.name}`
-                        : "Tap Here to Choose Receipt Photo"}
+                        ? receiptFile.name
+                        : lang === "my"
+                        ? "ပြေစာပုံ ရွေးချယ်ရန် ဤနေရာကို နှိပ်ပါ"
+                        : "Tap Here to Choose Screenshot"}
                     </span>
-                    <span className="text-sm font-semibold text-slate-600">
-                      (Or tap Confirm below to attach a sample KPay receipt for
-                      demo)
+                    <span className="mt-1 text-xs font-bold text-slate-600">
+                      {lang === "my"
+                        ? "(စမ်းသပ်နေစဉ် ပုံမရွေးဘဲ တိုက်ရိုက် အတည်ပြုနိုင်ပါသည် - နမူနာပြေစာ အလိုအလျောက် တွဲပေးပါမည်)"
+                        : "(In demo mode, a sample receipt is attached automatically if left blank)"}
                     </span>
                     <input
-                      id="receipt-upload"
                       type="file"
                       accept="image/*"
                       onChange={handleReceiptChange}
                       className="hidden"
                     />
                   </label>
-
-                  {receiptPreview && (
-                    <div className="mt-3 overflow-hidden rounded-xl border-2 border-slate-300 bg-white p-2">
-                      <img
-                        src={receiptPreview}
-                        alt="Receipt Preview"
-                        className="mx-auto max-h-48 object-contain"
-                      />
-                    </div>
-                  )}
                 </div>
+
+                {receiptPreview && (
+                  <div className="overflow-hidden rounded-2xl border-2 border-slate-300 bg-white p-2">
+                    <img
+                      src={receiptPreview}
+                      alt="Uploaded Receipt Preview"
+                      className="mx-auto max-h-56 rounded-xl object-contain"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
-            {bookingError && (
-              <div className="rounded-xl border-2 border-red-700 bg-red-50 p-4 text-lg font-bold text-red-900">
-                {bookingError}
+            {checkoutError && (
+              <div className="mt-4 rounded-2xl border-2 border-red-700 bg-red-50 p-4 text-base font-extrabold text-red-900">
+                {checkoutError}
               </div>
             )}
 
-            {/* Primary Checkout Button */}
-            {paymentMethod === "credit_points" ? (
-              <Button
-                type="button"
-                variant="success"
-                size="xl"
-                className="w-full"
-                disabled={!hasEnoughPoints || isSubmitting}
-                onClick={handleConfirmBooking}
-              >
-                <Sparkles className="mr-2 h-7 w-7" />
+            {/* Single Primary CTA */}
+            <button
+              type="button"
+              disabled={
+                isSubmitting ||
+                (paymentMethod === "credit_points" && !canUseCredits)
+              }
+              onClick={handleConfirmBooking}
+              className="mt-6 flex min-h-[64px] w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-6 py-4 text-xl font-black text-white shadow-lg transition-all hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CheckCircle2 className="h-6 w-6" />
+              <span>
                 {isSubmitting
-                  ? "Booking Your Queue Number..."
-                  : `1-Click Checkout (${formatCurrency(fee)} Points)`}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="xl"
-                className="w-full"
-                disabled={isSubmitting}
-                onClick={handleConfirmBooking}
-              >
-                <CheckCircle2 className="mr-2 h-7 w-7" />
-                {isSubmitting
-                  ? "Uploading Receipt & Booking..."
+                  ? lang === "my"
+                    ? "အလှည့်နံပါတ် ရယူနေပါသည်..."
+                    : "Securing Queue Number..."
+                  : paymentMethod === "credit_points"
+                  ? lang === "my"
+                    ? "Credit Points ဖြင့် ချက်ချင်း အလှည့်နံပါတ် ယူမည်"
+                    : "1-Click Pay with Credit Points"
+                  : lang === "my"
+                  ? "ပြေစာပို့ပြီး အလှည့်နံပါတ် ရယူမည်"
                   : "Submit Receipt & Get Queue Number"}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   // ============================================================================
-  // SCREEN 2: HOME - LARGE, EASY-TO-READ LIST OF AVAILABLE DOCTORS FOR TODAY
+  // 4. AVAILABLE DOCTORS TODAY VIEW (DEFAULT LOGGED-IN VIEW)
   // ============================================================================
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 space-y-8">
-      {/* Welcome Banner & Active Queue Shortcut */}
-      <div className="rounded-3xl border-2 border-slate-900 bg-white p-6 shadow-md">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-700 px-3 py-1 text-sm font-extrabold text-emerald-950">
-              <UserCheck className="h-4 w-4 text-emerald-700" />
-              Signed in as {currentPatient.name} (
-              {formatPhoneDisplay(currentPatient.phone)})
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-950 pt-1">
-              Available Doctors Today
-            </h1>
-            <p className="text-lg font-semibold text-slate-700">
-              Select a specialist below to get your instant queue number.
-            </p>
+    <div className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
+      {/* Cancel / Refund Notification Banner */}
+      {cancelNotice && (
+        <div className="mb-6 flex items-start justify-between gap-4 rounded-3xl border-2 border-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 p-5 text-emerald-950 shadow-md">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="h-7 w-7 shrink-0 text-emerald-700" />
+            <p className="text-base font-extrabold">{cancelNotice}</p>
           </div>
-
-          {myActiveBookings.length > 0 && (
-            <Button
-              variant="success"
-              size="lg"
-              onClick={() => {
-                setActiveBookingId(myActiveBookings[0].id);
-                setScreen("LIVE_QUEUE_TRACKER");
-              }}
-              className="shrink-0"
-            >
-              <BellRing className="mr-2 h-6 w-6" />
-              Your Queue Number (#{myActiveBookings[0].queue_number})
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Active Bookings Banner if Patient Has One */}
-      {myActiveBookings.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-xl font-black text-slate-950">
-            Your Active Appointments Today
-          </h2>
-          <div className="grid grid-cols-1 gap-4">
-            {myActiveBookings.map((b) => {
-              const doc = doctors.find((d) => d.id === b.doctor_id);
-              if (!doc) return null;
-              const isTurn = doc.current_queue_number === b.queue_number;
-              return (
-                <div
-                  key={b.id}
-                  className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl border-2 p-5 shadow-sm ${
-                    isTurn
-                      ? "border-emerald-800 bg-emerald-700 text-white"
-                      : "border-clinic-primary bg-clinic-light text-slate-950"
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-2xl font-black">
-                        Your Queue #{b.queue_number}
-                      </span>
-                      <span className="rounded-lg bg-slate-900 px-3 py-1 text-sm font-extrabold text-white">
-                        Doctor at #{doc.current_queue_number}
-                      </span>
-                    </div>
-                    <p className="text-xl font-extrabold">{doc.name}</p>
-                    <p className="text-base font-bold opacity-90">
-                      {doc.room_number}
-                    </p>
-                  </div>
-                  <Button
-                    variant={isTurn ? "outline" : "default"}
-                    size="lg"
-                    onClick={() => {
-                      setActiveBookingId(b.id);
-                      setScreen("LIVE_QUEUE_TRACKER");
-                    }}
-                    className="w-full sm:w-auto"
-                  >
-                    Open Live Queue Tracker
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={() => setCancelNotice(null)}
+            className="rounded-xl border border-emerald-700 px-3 py-1 text-xs font-black"
+          >
+            OK
+          </button>
         </div>
       )}
 
-      {/* Large Elderly-Friendly Doctor Cards */}
-      <div className="grid grid-cols-1 gap-6">
+      {/* Welcome Gradient Banner */}
+      <div className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 p-6 text-white shadow-xl sm:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-extrabold uppercase tracking-wider text-sky-200">
+              <UserCheck className="h-4 w-4 text-emerald-300" />
+              <span>
+                {lang === "my"
+                  ? `မင်္ဂလာပါ • ${currentPatient.name}`
+                  : `Welcome, ${currentPatient.name}`}
+              </span>
+            </div>
+            <h1 className="mt-2 text-2xl font-black sm:text-3xl">
+              {lang === "my"
+                ? "ယနေ့ ဆေးခန်းထိုင်မည့် အထူးကု ဆရာဝန်ကြီးများ"
+                : "Doctors Available Today"}
+            </h1>
+            <p className="mt-1 text-base font-medium text-blue-100">
+              {lang === "my"
+                ? "ပြသလိုသော ဆရာဝန်ကြီးကို ရွေးချယ်ပြီး အလှည့်နံပါတ် ကြိုတင်ရယူပါ။"
+                : "Tap on a specialist below to secure your live queue number."}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm">
+            <span className="block text-xs font-bold uppercase tracking-wider text-sky-200">
+              {lang === "my"
+                ? "သင့်လက်ကျန် Credit Points"
+                : "Your Credit Points"}
+            </span>
+            <span className="text-2xl font-black text-emerald-300">
+              {formatCurrency(currentPatient.credit_points, lang)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Doctors List */}
+      <div className="grid grid-cols-1 gap-5">
         {doctors
-          .filter((d) => d.is_active)
+          .filter((d) => !d.is_archived && d.is_active)
           .map((doctor) => {
             const waitingCount = bookings.filter(
               (b) =>
                 b.doctor_id === doctor.id &&
-                b.status === "waiting" &&
-                b.queue_number > doctor.current_queue_number
+                (b.status === "waiting" || b.status === "in_progress")
             ).length;
 
+            const isPostponed = doctor.status === "postponed";
+            const isDelayed = doctor.status === "delayed";
+
             return (
-              <Card
+              <div
                 key={doctor.id}
-                className="border-2 border-slate-300 hover:border-slate-900 transition-all shadow-md"
+                className={`flex flex-col justify-between gap-5 rounded-3xl border-2 bg-white p-6 shadow-md transition-all sm:flex-row sm:items-center ${
+                  isPostponed
+                    ? "border-red-300 bg-red-50/30 opacity-90"
+                    : "border-slate-200 hover:border-blue-600 hover:shadow-lg"
+                }`}
               >
-                <CardContent className="p-6 sm:p-7">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                    {/* Left: Doctor Details */}
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="default" className="text-base px-3.5 py-1">
-                          <MapPin className="mr-1.5 h-4 w-4" />
-                          {doctor.room_number}
-                        </Badge>
-                        <Badge variant="secondary" className="text-base px-3.5 py-1">
-                          Fee: {formatCurrency(doctor.consultation_fee)}
-                        </Badge>
-                      </div>
+                <div className="space-y-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 px-3 py-1 text-xs font-black uppercase tracking-wider text-white">
+                      {lang === "my"
+                        ? `အခန်း ${doctor.room_number}`
+                        : `Room ${doctor.room_number}`}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-xl bg-blue-50 px-3 py-1 text-xs font-extrabold text-blue-900">
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      {doctor.start_time} – {doctor.end_time}
+                    </span>
 
-                      <h2 className="text-2xl sm:text-3xl font-black text-slate-950">
-                        {doctor.name}
-                      </h2>
+                    {/* Status Badge */}
+                    {doctor.status === "available" && (
+                      <span className="rounded-xl bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-900">
+                        {lang === "my"
+                          ? "● ဆေးခန်းထိုင်နေပါသည်"
+                          : "● Available Today"}
+                      </span>
+                    )}
+                    {isDelayed && (
+                      <span className="rounded-xl bg-amber-100 px-3 py-1 text-xs font-black text-amber-950">
+                        {lang === "my"
+                          ? `● ${doctor.delay_minutes} မိနစ် နောက်ကျမည်`
+                          : `● Delayed ${doctor.delay_minutes}m`}
+                      </span>
+                    )}
+                    {isPostponed && (
+                      <span className="rounded-xl bg-red-100 px-3 py-1 text-xs font-black text-red-900">
+                        {lang === "my"
+                          ? `● ရက်ရွှေ့ဆိုင်းထားသည် (${
+                              doctor.postponed_to || "TBA"
+                            })`
+                          : `● Postponed (${doctor.postponed_to || "TBA"})`}
+                      </span>
+                    )}
+                  </div>
 
-                      <p className="flex items-center gap-2 text-lg sm:text-xl font-bold text-slate-700">
-                        <Stethoscope className="h-6 w-6 text-clinic-primary shrink-0" />
-                        {doctor.specialty}
-                      </p>
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-950">
+                      {lang === "my"
+                        ? doctor.name_my || doctor.name
+                        : doctor.name}
+                    </h2>
+                    <p className="text-base font-bold text-clinic-primary">
+                      {lang === "my"
+                        ? doctor.specialty_my || doctor.specialty
+                        : doctor.specialty}
+                    </p>
+                  </div>
 
-                      <div className="flex flex-wrap items-center gap-4 pt-1 text-base font-extrabold text-slate-800">
-                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3.5 py-2 border border-slate-300">
-                          <Clock className="h-5 w-5 text-clinic-primary" />
-                          Currently Serving:{" "}
-                          <strong className="text-xl text-clinic-primary">
-                            #{doctor.current_queue_number}
-                          </strong>
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3.5 py-2 border border-emerald-300 text-emerald-950">
-                          {waitingCount === 0
-                            ? "No Wait • Immediate Next Turn"
-                            : `${waitingCount} ${
-                                waitingCount === 1 ? "Patient" : "Patients"
-                              } Waiting`}
-                        </span>
-                      </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 px-3.5 py-1.5 text-sm font-black text-emerald-950">
+                      {lang === "my"
+                        ? `ယခုပြသနေသော နံပါတ် - #${doctor.current_queue_number}`
+                        : `Now Serving: #${doctor.current_queue_number}`}
                     </div>
-
-                    {/* Right: Massive Primary Action Button */}
-                    <div className="lg:w-72 shrink-0">
-                      <Button
-                        size="xl"
-                        className="w-full"
-                        onClick={() => handleStartBooking(doctor)}
-                      >
-                        <CalendarCheck className="mr-2.5 h-7 w-7" />
-                        Book Appointment
-                      </Button>
+                    <div className="rounded-2xl border-2 border-slate-200 bg-slate-100 px-3.5 py-1.5 text-sm font-extrabold text-slate-900">
+                      {lang === "my"
+                        ? `စောင့်ဆိုင်းနေသူ (${waitingCount}) ဦး`
+                        : `${waitingCount} in Queue`}
+                    </div>
+                    <div className="rounded-2xl border-2 border-blue-200 bg-blue-50 px-3.5 py-1.5 text-sm font-black text-blue-950">
+                      {lang === "my" ? "စမ်းသပ်ခ - " : "Fee: "}
+                      {formatCurrency(doctor.consultation_fee, lang)}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isPostponed}
+                  onClick={() => {
+                    setSelectedDoctorId(doctor.id);
+                    setView("checkout");
+                  }}
+                  className="flex min-h-[60px] shrink-0 items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 px-6 py-4 text-lg font-black text-white shadow-md transition-all hover:opacity-95 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:from-slate-300 disabled:to-slate-400"
+                >
+                  <span>
+                    {isPostponed
+                      ? lang === "my"
+                        ? "ရက်ရွှေ့ဆိုင်းထားပါသည်"
+                        : "Postponed"
+                      : lang === "my"
+                      ? "အလှည့်နံပါတ် ယူမည်"
+                      : "Book Queue"}
+                  </span>
+                  {!isPostponed && <ArrowRight className="h-5 w-5" />}
+                </button>
+              </div>
             );
           })}
       </div>
     </div>
   );
+}
+
+function useCallbackText(lang: "my" | "en") {
+  return lang;
 }

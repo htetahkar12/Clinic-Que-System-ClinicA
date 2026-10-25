@@ -1,10 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { CLINIC_NAME, PRIMARY_COLOR } from "@/clinic.config";
+import { CLINIC_NAME, CLINIC_NAME_MY, PRIMARY_COLOR } from "@/clinic.config";
 import { ClinicProvider } from "@/lib/clinic-store";
 import { ClinicHeader } from "@/components/clinic-header";
-import { DevPortalSwitcher } from "@/components/dev-portal-switcher";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -13,9 +12,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: `${CLINIC_NAME} | Queue & Appointment Booking`,
+  title: `${CLINIC_NAME} (${CLINIC_NAME_MY}) | Queue & Appointment Booking`,
   description:
-    "Elderly-friendly White-Label Poly Clinic Live Queue Tracker and Appointment Booking PWA",
+    "Elderly-friendly White-Label Poly Clinic Live Queue Tracker and Pre-Paid Appointment Booking PWA",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -37,12 +36,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} min-h-screen flex flex-col bg-slate-50 text-slate-950`}>
+    <html lang="my">
+      <body
+        className={`${inter.className} min-h-screen flex flex-col bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-950`}
+      >
         <ClinicProvider>
           <ClinicHeader />
           <main className="flex-1">{children}</main>
-          <DevPortalSwitcher />
         </ClinicProvider>
       </body>
     </html>

@@ -7,17 +7,21 @@ import { CLINIC_NAME, LOGO_URL, PRIMARY_COLOR } from "@/clinic.config";
 import { useClinic } from "@/lib/clinic-store";
 import { formatCurrency } from "@/lib/utils";
 import {
-  Stethoscope,
-  LayoutDashboard,
-  UserRound,
   Wallet,
   LogOut,
   Wifi,
+  ShieldCheck,
+  Stethoscope,
+  Lock,
 } from "lucide-react";
 
 export function ClinicHeader() {
   const pathname = usePathname();
   const { currentPatient, logoutPatient, isRealtimeConnected } = useClinic();
+
+  const isPatientPortal = pathname === "/";
+  const isReceptionPortal = pathname?.startsWith("/reception");
+  const isDoctorPortal = pathname?.startsWith("/doctor");
 
   return (
     <header className="sticky top-0 z-40 w-full border-b-2 border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90">
@@ -48,52 +52,14 @@ export function ClinicHeader() {
           </div>
         </Link>
 
-        {/* Portal Switcher & Patient Wallet Status */}
-        <div className="flex flex-wrap items-center gap-2">
-          <nav
-            aria-label="Portal Navigation"
-            className="flex items-center rounded-xl border-2 border-slate-200 bg-slate-100 p-1"
-          >
-            <Link
-              href="/"
-              className={`flex min-h-[44px] items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-extrabold transition-colors ${
-                pathname === "/"
-                  ? "bg-clinic-primary text-white shadow-sm"
-                  : "text-slate-800 hover:bg-white"
-              }`}
-            >
-              <UserRound className="h-4 w-4" />
-              <span>Patient</span>
-            </Link>
-            <Link
-              href="/reception"
-              className={`flex min-h-[44px] items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-extrabold transition-colors ${
-                pathname?.startsWith("/reception")
-                  ? "bg-clinic-primary text-white shadow-sm"
-                  : "text-slate-800 hover:bg-white"
-              }`}
-            >
-              <LayoutDashboard className="h-4 w-4" />
-              <span>Reception</span>
-            </Link>
-            <Link
-              href="/doctor"
-              className={`flex min-h-[44px] items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-extrabold transition-colors ${
-                pathname?.startsWith("/doctor")
-                  ? "bg-clinic-primary text-white shadow-sm"
-                  : "text-slate-800 hover:bg-white"
-              }`}
-            >
-              <Stethoscope className="h-4 w-4" />
-              <span>Doctor</span>
-            </Link>
-          </nav>
-
-          {currentPatient && pathname === "/" && (
+        {/* Dynamic Context Header Right Side */}
+        <div className="flex items-center gap-2">
+          {/* 1. PATIENT PORTAL HEADER: Shows ONLY Patient Credit Points & Sign Out. NO Staff Links! */}
+          {isPatientPortal && currentPatient && (
             <div className="flex items-center gap-2">
               <div className="flex min-h-[48px] items-center gap-2 rounded-xl border-2 border-emerald-700 bg-emerald-50 px-3.5 py-1.5 text-emerald-950">
                 <Wallet className="h-5 w-5 text-emerald-700" />
-                <div className=" leading-tight">
+                <div className="leading-tight">
                   <span className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800">
                     Credit Points
                   </span>
@@ -111,6 +77,44 @@ export function ClinicHeader() {
                 <LogOut className="h-5 w-5" />
                 <span className="sr-only">Sign Out</span>
               </button>
+            </div>
+          )}
+
+          {/* 2. RECEPTION PORTAL HEADER: Dedicated Staff Badge */}
+          {isReceptionPortal && (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-xl border-2 border-slate-900 bg-slate-900 px-3.5 py-2 text-white">
+                <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                <span className="text-sm font-black uppercase tracking-wider">
+                  Reception Staff Console
+                </span>
+              </div>
+              <Link
+                href="/doctor"
+                className="flex min-h-[44px] items-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white px-3.5 py-1.5 text-sm font-extrabold text-slate-900 hover:bg-slate-100"
+              >
+                <Stethoscope className="h-4 w-4" />
+                <span>Doctor Room</span>
+              </Link>
+            </div>
+          )}
+
+          {/* 3. DOCTOR PORTAL HEADER: Dedicated Doctor Room Badge */}
+          {isDoctorPortal && (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-xl border-2 border-slate-900 bg-slate-900 px-3.5 py-2 text-white">
+                <Stethoscope className="h-5 w-5 text-clinic-primary" />
+                <span className="text-sm font-black uppercase tracking-wider">
+                  Doctor Consultation Display
+                </span>
+              </div>
+              <Link
+                href="/reception"
+                className="flex min-h-[44px] items-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white px-3.5 py-1.5 text-sm font-extrabold text-slate-900 hover:bg-slate-100"
+              >
+                <Lock className="h-4 w-4" />
+                <span>Reception Desk</span>
+              </Link>
             </div>
           )}
         </div>

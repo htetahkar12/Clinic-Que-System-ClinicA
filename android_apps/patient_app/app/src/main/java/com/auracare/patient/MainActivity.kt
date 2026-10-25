@@ -2,7 +2,6 @@ package com.auracare.patient
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,8 +9,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
@@ -20,17 +17,12 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.view.Gravity
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -47,7 +39,7 @@ class MainActivity : Activity() {
     private val FILE_CHOOSER_REQ_CODE = 1001
     private val CHANNEL_ID = "clinic_patient_live_alerts_v3"
 
-    private var serverUrl = "https://clinic-que-system-clinic-a.vercel.app"
+    private val serverUrl = "https://clinic-que-system-clinic-a.vercel.app"
     private var pollTimer: Timer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val seenMessageIds = HashSet<String>()
@@ -56,67 +48,13 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = getSharedPreferences("clinic_patient_prefs", Context.MODE_PRIVATE)
-        serverUrl = prefs.getString("server_url", serverUrl) ?: serverUrl
-
         setupNotificationChannel()
         requestNotificationPermissionIfNeeded()
         acquireKeepAliveWakeLock()
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0F172A"))
-        }
-
-        // Top Bar (Patient Portal Indicator + Refresh + Server Settings)
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(28, 18, 28, 18)
-            setBackgroundColor(Color.parseColor("#0F172A"))
-        }
-
-        val titleView = TextView(this).apply {
-            text = "🏥 လူနာ အလှည့်နှင့် ဘိုကင်စနစ် (Patient App)"
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            setTypeface(null, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val btnRefresh = Button(this).apply {
-            text = "Refresh"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#1D4ED8"))
-            setOnClickListener { webView.reload() }
-        }
-
-        val btnServer = Button(this).apply {
-            text = "Server"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#334155"))
-            setOnClickListener { showServerConfigDialog() }
-        }
-
-        topBar.addView(titleView)
-        topBar.addView(btnRefresh)
-        topBar.addView(btnServer)
-
-        webView = WebView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        }
-
+        webView = WebView(this)
         configureWebView()
-
-        root.addView(topBar)
-        root.addView(webView)
-        setContentView(root)
+        setContentView(webView)
 
         webView.loadUrl(serverUrl)
         startBackgroundAlertPolling()
@@ -139,9 +77,10 @@ class MainActivity : Activity() {
                 request: WebResourceRequest?
             ): Boolean {
                 val target = request?.url?.toString() ?: return false
-                // Strictly block Reception, Doctor, and SuperAdmin routes in Patient App!
+                // Strictly block Reception, Doctor, TV, and SuperAdmin routes in Patient App!
                 if (target.contains("/reception") ||
                     target.contains("/doctor") ||
+                    target.contains("/tv") ||
                     target.contains("\$uper@dmin") ||
                     target.contains("super-admin")
                 ) {
@@ -190,29 +129,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showServerConfigDialog() {
-        val input = EditText(this).apply {
-            setText(serverUrl)
-            setPadding(36, 28, 36, 28)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("ဆေးခန်း Server လိပ်စာ ပြင်ဆင်ရန်")
-            .setView(input)
-            .setPositiveButton("သိမ်းမည်") { _, _ ->
-                val cleaned = input.text.toString().trim().trimEnd('/')
-                if (cleaned.isNotEmpty()) {
-                    serverUrl = cleaned
-                    getSharedPreferences("clinic_patient_prefs", Context.MODE_PRIVATE)
-                        .edit()
-                        .putString("server_url", serverUrl)
-                        .apply()
-                    webView.loadUrl(serverUrl)
-                }
-            }
-            .setNegativeButton("ပိတ်မည်", null)
-            .show()
-    }
-
     private fun setupNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -254,7 +170,7 @@ class MainActivity : Activity() {
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "ClinicPatientApp::BackgroundQueueAlertLock"
             )
-            wakeLock?.acquire(6 * 60 * 60 * 1000L) // Keep background alert active up to 6 hours
+            wakeLock?.acquire(6 * 60 * 60 * 1000L)
         } catch (_: Exception) {
         }
     }
@@ -338,7 +254,7 @@ class MainActivity : Activity() {
                 Notification.Builder(this)
             }
 
-            builder.setSmallIcon(android.R.drawable.ic_dialog_info)
+            builder.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(Notification.BigTextStyle().bigText(body))

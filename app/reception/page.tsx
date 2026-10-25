@@ -50,6 +50,7 @@ export default function ReceptionCommandCenterPage() {
     settings,
     patients,
     doctors,
+    allSpecialties,
     bookings,
     transactions,
     messages,
@@ -105,6 +106,8 @@ export default function ReceptionCommandCenterPage() {
     useState<string>("");
   const [savedSpecialtyFilter, setSavedSpecialtyFilter] =
     useState<string>("all");
+  const [showSpecialtySuggestions, setShowSpecialtySuggestions] =
+    useState<boolean>(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
   const [doctorForm, setDoctorForm] = useState<DoctorFormInput>({
     doctor_code: "CARD-103",
@@ -816,45 +819,6 @@ export default function ReceptionCommandCenterPage() {
                   : "Broadcast Message"}
               </span>
             </button>
-
-            <a
-              href="/downloads/Clinic-Reception-Doctor-Windows-Setup.exe"
-              download="Clinic-Reception-Doctor-Windows-Setup.exe"
-              className="inline-flex min-h-[46px] items-center gap-1.5 rounded-2xl border border-emerald-400/50 bg-emerald-500/20 px-3.5 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/30 sm:text-sm"
-            >
-              <Building2 className="h-4 w-4 text-emerald-300" />
-              <span>
-                {lang === "my"
-                  ? "Windows Installer (.exe)"
-                  : "Windows Installer (.exe)"}
-              </span>
-            </a>
-
-            <a
-              href="/downloads/Clinic-Reception-Doctor-Android.apk"
-              download="Clinic-Reception-Doctor-Android.apk"
-              className="inline-flex min-h-[46px] items-center gap-1.5 rounded-2xl border border-cyan-400/50 bg-cyan-500/20 px-3.5 py-2 text-xs font-black text-cyan-100 hover:bg-cyan-500/30 sm:text-sm"
-            >
-              <Share2 className="h-4 w-4 text-cyan-300" />
-              <span>
-                {lang === "my"
-                  ? "Reception+Doctor APK"
-                  : "Reception+Doctor APK"}
-              </span>
-            </a>
-
-            <a
-              href="/downloads/Clinic-Patient-Android.apk"
-              download="Clinic-Patient-Android.apk"
-              className="inline-flex min-h-[46px] items-center gap-1.5 rounded-2xl border border-indigo-400/50 bg-indigo-500/20 px-3.5 py-2 text-xs font-black text-indigo-100 hover:bg-indigo-500/30 sm:text-sm"
-            >
-              <Share2 className="h-4 w-4 text-indigo-300" />
-              <span>
-                {lang === "my"
-                  ? "လူနာ Android APK"
-                  : "Patient Android APK"}
-              </span>
-            </a>
 
             <button
               type="button"
@@ -1951,8 +1915,11 @@ export default function ReceptionCommandCenterPage() {
                           ? "အထူးကု ဘာသာရပ် အားလုံး (All Specialties)"
                           : "All Specialties"}
                       </option>
-                      {SPECIALTY_PRESETS.map((sp) => (
-                        <option key={sp.codePrefix} value={sp.codePrefix}>
+                      {allSpecialties.map((sp) => (
+                        <option
+                          key={`${sp.codePrefix}-${sp.specialty_my}`}
+                          value={sp.codePrefix}
+                        >
                           [{sp.codePrefix}] {sp.specialty_my}
                         </option>
                       ))}
@@ -2032,48 +1999,6 @@ export default function ReceptionCommandCenterPage() {
                 </div>
               </div>
 
-              {/* Quick Specialty Preset Selector (auto-updates Specialty + Doctor Code!) */}
-              <div>
-                <label className="mb-1 block text-xs font-extrabold uppercase text-slate-700">
-                  {lang === "my"
-                    ? "အထူးကု ဘာသာရပ် အမြန်ရွေးချယ်ရန် (နှိပ်လိုက်သည်နှင့် Code အလိုအလျောက် ပေါ်ပါမည်)"
-                    : "Quick Specialty Selector (Auto-Generates Code)"}
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {SPECIALTY_PRESETS.map((preset) => {
-                    const isSelected =
-                      doctorForm.specialty_my === preset.specialty_my;
-                    return (
-                      <button
-                        key={preset.codePrefix}
-                        type="button"
-                        onClick={() => {
-                          const nextRoom =
-                            doctorForm.room_number || preset.defaultRoom;
-                          const nextCode = `${preset.codePrefix}-${nextRoom}`;
-                          setDoctorForm({
-                            ...doctorForm,
-                            specialty_my: preset.specialty_my,
-                            specialty: preset.specialty_en,
-                            doctor_code: nextCode,
-                            consultation_fee:
-                              doctorForm.consultation_fee || preset.defaultFee,
-                          });
-                        }}
-                        className={`rounded-xl border px-2.5 py-1 text-xs font-black transition-all ${
-                          isSelected
-                            ? "border-indigo-900 bg-indigo-900 text-amber-300 shadow-sm"
-                            : "border-slate-300 bg-slate-50 text-slate-800 hover:bg-slate-100"
-                        }`}
-                      >
-                        [{preset.codePrefix}]{" "}
-                        {preset.specialty_my.split(" ")[0]}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-extrabold text-slate-900">
@@ -2107,55 +2032,167 @@ export default function ReceptionCommandCenterPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                    အထူးကု ဘာသာရပ် (မြန်မာဘာသာဖြင့်) *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={doctorForm.specialty_my}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setDoctorForm({
-                        ...doctorForm,
-                        specialty_my: val,
-                        doctor_code: generateDoctorCode(
-                          `${val} ${doctorForm.specialty}`,
-                          doctorForm.room_number,
-                          doctors.length + 1
-                        ),
-                      });
-                    }}
-                    placeholder="ဥပမာ - နှလုံးနှင့် သွေးတိုး အထူးကုဆရာဝန်ကြီး"
-                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                  />
+              {/* Smart Type-Ahead Specialty Input + Auto Database Save */}
+              <div className="relative">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                      အထူးကု ဘာသာရပ် (စာရိုက်ရှာရန် သို့မဟုတ် အသစ်ထည့်ရန်) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={doctorForm.specialty_my}
+                      onFocus={() => setShowSpecialtySuggestions(true)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setShowSpecialtySuggestions(true);
+                        const exactPreset = allSpecialties.find(
+                          (sp) =>
+                            sp.specialty_my.toLowerCase() ===
+                            val.trim().toLowerCase()
+                        );
+                        const nextRoom =
+                          doctorForm.room_number ||
+                          exactPreset?.defaultRoom ||
+                          "101";
+                        const nextCode = exactPreset
+                          ? `${exactPreset.codePrefix}-${nextRoom}`
+                          : generateDoctorCode(
+                              `${val} ${doctorForm.specialty}`,
+                              nextRoom,
+                              doctors.length + 1
+                            );
+                        setDoctorForm({
+                          ...doctorForm,
+                          specialty_my: val,
+                          specialty:
+                            exactPreset?.specialty_en || doctorForm.specialty,
+                          doctor_code: nextCode,
+                        });
+                      }}
+                      placeholder="ဥပမာ - နှလုံး လို့စရိုက်ပါ (သို့) စိတ်ကြိုက်ရိုက်ထည့်ပါ"
+                      className="min-h-[48px] w-full rounded-xl border-2 border-indigo-700 bg-indigo-50/30 px-3.5 font-bold text-slate-950 focus:bg-white focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-extrabold text-slate-900">
+                      Specialty (English)
+                    </label>
+                    <input
+                      type="text"
+                      value={doctorForm.specialty}
+                      onFocus={() => setShowSpecialtySuggestions(true)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setShowSpecialtySuggestions(true);
+                        setDoctorForm({
+                          ...doctorForm,
+                          specialty: val,
+                          doctor_code: generateDoctorCode(
+                            `${doctorForm.specialty_my} ${val}`,
+                            doctorForm.room_number,
+                            doctors.length + 1
+                          ),
+                        });
+                      }}
+                      placeholder="e.g., Cardiologist"
+                      className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-sm font-extrabold text-slate-900">
-                    Specialty (English)
-                  </label>
-                  <input
-                    type="text"
-                    value={doctorForm.specialty}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setDoctorForm({
-                        ...doctorForm,
-                        specialty: val,
-                        doctor_code: generateDoctorCode(
-                          `${doctorForm.specialty_my} ${val}`,
-                          doctorForm.room_number,
-                          doctors.length + 1
-                        ),
-                      });
-                    }}
-                    placeholder="e.g., Senior Cardiologist"
-                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3.5 font-bold"
-                  />
-                </div>
+                {/* Live Type-Ahead Autocomplete Dropdown */}
+                {showSpecialtySuggestions && (
+                  <div className="mt-2 rounded-2xl border-2 border-indigo-800 bg-white p-2.5 shadow-xl">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <span className="text-xs font-black text-indigo-950">
+                        {doctorForm.specialty_my.trim()
+                          ? `"${doctorForm.specialty_my}" နှင့် သက်ဆိုင်သော အထူးကုဘာသာရပ်များ (နှိပ်၍ ရွေးချယ်နိုင်ပါသည်)`
+                          : `အထူးကု ဘာသာရပ်များ (${allSpecialties.length} မျိုး) — စာရိုက်ရှာပါ သို့မဟုတ် အသစ်ရိုက်ထည့်ပါ`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSpecialtySuggestions(false)}
+                        className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-black text-slate-700 hover:bg-slate-200"
+                      >
+                        ပိတ်မည် ✕
+                      </button>
+                    </div>
+                    <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
+                      {(() => {
+                        const q = (
+                          doctorForm.specialty_my ||
+                          doctorForm.specialty ||
+                          ""
+                        )
+                          .trim()
+                          .toLowerCase();
+                        const matches = allSpecialties.filter(
+                          (sp) =>
+                            !q ||
+                            sp.specialty_my.toLowerCase().includes(q) ||
+                            sp.specialty_en.toLowerCase().includes(q) ||
+                            sp.codePrefix.toLowerCase().includes(q) ||
+                            (sp.category || "").toLowerCase().includes(q)
+                        );
+                        if (matches.length === 0) {
+                          return (
+                            <div className="rounded-xl border border-emerald-600 bg-emerald-50 p-3 text-xs font-extrabold text-emerald-950">
+                              ✓ &ldquo;{doctorForm.specialty_my}&rdquo; ကို
+                              အထူးကုဘာသာရပ်အသစ်အဖြစ် Database တွင် အလိုအလျောက်
+                              မှတ်သားပေးပါမည်။ နောက်တစ်ကြိမ် ပြန်ရိုက်သည့်အခါ
+                              အလိုအလျောက် ပြန်ပေါ်လာပါမည်။
+                            </div>
+                          );
+                        }
+                        return matches.map((sp) => (
+                          <button
+                            key={`${sp.codePrefix}-${sp.specialty_my}`}
+                            type="button"
+                            onClick={() => {
+                              const nextRoom =
+                                doctorForm.room_number || sp.defaultRoom;
+                              setDoctorForm({
+                                ...doctorForm,
+                                specialty_my: sp.specialty_my,
+                                specialty: sp.specialty_en,
+                                doctor_code: `${sp.codePrefix}-${nextRoom}`,
+                                consultation_fee:
+                                  doctorForm.consultation_fee || sp.defaultFee,
+                              });
+                              setShowSpecialtySuggestions(false);
+                            }}
+                            className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-indigo-600 hover:bg-indigo-50"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="rounded-md bg-indigo-950 px-2 py-0.5 font-mono text-xs font-black text-amber-300">
+                                  {sp.codePrefix}
+                                </span>
+                                <span className="text-sm font-black text-slate-950">
+                                  {sp.specialty_my}
+                                </span>
+                                <span className="text-xs font-bold text-slate-600">
+                                  ({sp.specialty_en})
+                                </span>
+                              </div>
+                              {sp.category && (
+                                <p className="mt-0.5 text-[11px] font-bold text-indigo-800">
+                                  {sp.category}
+                                </p>
+                              )}
+                            </div>
+                            <span className="shrink-0 rounded-lg bg-indigo-100 px-2 py-1 text-[11px] font-black text-indigo-900">
+                              ရွေးမည်
+                            </span>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -2309,8 +2346,11 @@ export default function ReceptionCommandCenterPage() {
                     ? "အထူးကု ဘာသာရပ် အားလုံး (All Specialties)"
                     : "All Specialties"}
                 </option>
-                {SPECIALTY_PRESETS.map((sp) => (
-                  <option key={sp.codePrefix} value={sp.codePrefix}>
+                {allSpecialties.map((sp) => (
+                  <option
+                    key={`${sp.codePrefix}-${sp.specialty_my}`}
+                    value={sp.codePrefix}
+                  >
                     [{sp.codePrefix}] {sp.specialty_my}
                   </option>
                 ))}
@@ -3386,6 +3426,46 @@ export default function ReceptionCommandCenterPage() {
           </div>
         </div>
       )}
+
+      {/* Subtle Footer with App Download Links */}
+      <footer className="mt-10 border-t border-slate-200 pt-5 pb-4 text-center text-xs font-bold text-slate-600">
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+          <span className="text-slate-500">
+            {lang === "my"
+              ? "ဆေးခန်း App ဒေါင်းလုဒ်ရယူရန် —"
+              : "Download Clinic Apps:"}
+          </span>
+          <a
+            href="/downloads/Clinic-Reception-Doctor-Windows-Setup.exe"
+            download="Clinic-Reception-Doctor-Windows-Setup.exe"
+            className="text-blue-700 underline underline-offset-4 hover:text-blue-900"
+          >
+            {lang === "my"
+              ? "Windows Installer (Reception + Doctor .exe)"
+              : "Windows Installer (Reception + Doctor .exe)"}
+          </a>
+          <span className="text-slate-300">•</span>
+          <a
+            href="/downloads/Clinic-Reception-Doctor-Android.apk"
+            download="Clinic-Reception-Doctor-Android.apk"
+            className="text-blue-700 underline underline-offset-4 hover:text-blue-900"
+          >
+            {lang === "my"
+              ? "Reception + Doctor Android App (.apk)"
+              : "Reception + Doctor Android App (.apk)"}
+          </a>
+          <span className="text-slate-300">•</span>
+          <a
+            href="/downloads/Clinic-Patient-Android.apk"
+            download="Clinic-Patient-Android.apk"
+            className="text-blue-700 underline underline-offset-4 hover:text-blue-900"
+          >
+            {lang === "my"
+              ? "လူနာ Android App (.apk)"
+              : "Patient Android App (.apk)"}
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

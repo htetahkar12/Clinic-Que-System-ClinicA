@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep Royal Medical Blue Rounded Background -->
+    <path
+        android:fillColor="#0B5ED7"
+        android:pathData="M24,6 L84,6 C93.94,6 102,14.06 102,24 L102,84 C102,93.94 93.94,102 84,102 L24,102 C14.06,102 6,93.94 6,84 L6,24 C6,14.06 14.06,6 24,6 Z" />
+
+    <!-- Subtle Inner Indigo Glow Circle -->
+    <path
+        android:fillColor="#1E3A8A"
+        android:pathData="M54,16 A38,38 0 1,1 53.9,16 Z" />
+
+    <!-- White Shield / Medical Badge Outline -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,22 L78,31 L78,52 C78,68.5 67.8,81.4 54,87 C40.2,81.4 30,68.5 30,52 L30,31 Z" />
+
+    <!-- Inner Teal / Blue Medical Cross -->
+    <path
+        android:fillColor="#0B5ED7"
+        android:pathData="M49,35 L59,35 L59,47 L71,47 L71,57 L59,57 L59,69 L49,69 L49,57 L37,57 L37,47 L49,47 Z" />
+
+    <!-- Gold Accent Dot at Top -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M54,25 A3,3 0 1,1 53.9,25 Z" />
+</vector>

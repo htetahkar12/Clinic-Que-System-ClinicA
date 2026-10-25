@@ -493,11 +493,6 @@ class _PatientPortalHomeScreenState extends State<PatientPortalHomeScreen> {
                 ],
               ),
             ),
-          IconButton(
-            tooltip: 'Server ချိတ်ဆက်မှု',
-            onPressed: _showServerUrlModal,
-            icon: const Icon(Icons.dns_outlined, color: Color(0xFF334155)),
-          ),
           if (me != null)
             IconButton(
               tooltip: 'အကောင့်မှထွက်ရန်',

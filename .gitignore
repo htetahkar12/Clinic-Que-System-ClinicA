@@ -26,6 +26,8 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+*credentials*.md
+clinic_accounts_and_credentials.md
 
 # vercel
 .vercel

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep Slate-Indigo Rounded Staff Console Background -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M24,6 L84,6 C93.94,6 102,14.06 102,24 L102,84 C102,93.94 93.94,102 84,102 L24,102 C14.06,102 6,93.94 6,84 L6,24 C6,14.06 14.06,6 24,6 Z" />
+
+    <!-- Emerald Medical Ring -->
+    <path
+        android:fillColor="#059669"
+        android:pathData="M54,15 A39,39 0 1,1 53.9,15 Z" />
+
+    <!-- Inner Dark Navy Circle -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M54,21 A33,33 0 1,1 53.9,21 Z" />
+
+    <!-- Crisp White Medical Cross + Stethoscope Crest -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,31 L60,31 L60,46 L75,46 L75,58 L60,58 L60,73 L48,73 L48,58 L33,58 L33,46 L48,46 Z" />
+
+    <!-- Gold Staff Star Emblem in Center -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M54,47 A5,5 0 1,1 53.9,47 Z" />
+</vector>

@@ -11,7 +11,8 @@
         android:allowBackup="true"
         android:label="Clinic Reception &amp; Doctor"
         android:usesCleartextTraffic="true"
-        android:icon="@android:drawable/ic_menu_manage"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity

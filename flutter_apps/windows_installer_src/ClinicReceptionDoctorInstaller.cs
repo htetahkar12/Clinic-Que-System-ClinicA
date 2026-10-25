@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
@@ -9,7 +10,6 @@ namespace ClinicReceptionDoctorSetup
 {
     public class SetupForm : Form
     {
-        private TextBox serverInput;
         private CheckBox desktopShortcutBox;
         private CheckBox launchNowBox;
         private Label statusLbl;
@@ -17,12 +17,13 @@ namespace ClinicReceptionDoctorSetup
 
         public SetupForm()
         {
-            this.Text = "Clinic Reception + Doctor — Windows Installer Setup";
-            this.Size = new Size(580, 420);
+            this.Text = "Clinic Reception + Doctor — Windows Setup";
+            this.Size = new Size(560, 360);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.White;
+            this.Icon = CreateMedicalAppIcon();
 
             Panel header = new Panel
             {
@@ -43,36 +44,20 @@ namespace ClinicReceptionDoctorSetup
 
             Label sub = new Label
             {
-                Text = "Reception နှင့် ဆရာဝန်အခန်း အသုံးပြုရန် Windows Desktop Installer (SuperAdmin သည် Web သီးသန့်ဖြစ်သည်)",
+                Text = "Reception နှင့် ဆရာဝန်အခန်း အသုံးပြုရန် Windows Desktop Installer",
                 ForeColor = Color.FromArgb(148, 163, 184),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
                 AutoSize = true,
                 Location = new Point(22, 50)
             };
             header.Controls.Add(sub);
-
-            Label serverLbl = new Label
-            {
-                Text = "ဆေးခန်း Server လိပ်စာ (Vercel Cloud URL သို့မဟုတ် Local Server):",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(24, 108),
-                AutoSize = true
-            };
-
-            serverInput = new TextBox
-            {
-                Text = "https://clinic-que-system-clinic-a.vercel.app",
-                Font = new Font("Segoe UI", 10),
-                Location = new Point(24, 134),
-                Width = 510
-            };
 
             desktopShortcutBox = new CheckBox
             {
                 Text = "Desktop ပေါ်တွင် Shortcut တင်ပေးမည် (Create Desktop Shortcut)",
                 Checked = true,
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(24, 180),
+                Location = new Point(24, 118),
                 AutoSize = true
             };
 
@@ -81,7 +66,7 @@ namespace ClinicReceptionDoctorSetup
                 Text = "သွင်းပြီးသည်နှင့် Reception + Doctor App ကို တန်းဖွင့်မည်",
                 Checked = true,
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(24, 212),
+                Location = new Point(24, 152),
                 AutoSize = true
             };
 
@@ -90,7 +75,7 @@ namespace ClinicReceptionDoctorSetup
                 Text = "Install ခလုတ်ကို နှိပ်၍ ကွန်ပျူတာထဲသို့ သွင်းနိုင်ပါသည်။",
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(11, 94, 215),
-                Location = new Point(24, 255),
+                Location = new Point(24, 198),
                 AutoSize = true
             };
 
@@ -101,8 +86,8 @@ namespace ClinicReceptionDoctorSetup
                 BackColor = Color.FromArgb(11, 94, 215),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(510, 50),
-                Location = new Point(24, 292)
+                Size = new Size(495, 50),
+                Location = new Point(24, 236)
             };
             installBtn.Click += OnInstallClick;
 
@@ -110,9 +95,26 @@ namespace ClinicReceptionDoctorSetup
             this.Controls.Add(statusLbl);
             this.Controls.Add(launchNowBox);
             this.Controls.Add(desktopShortcutBox);
-            this.Controls.Add(serverInput);
-            this.Controls.Add(serverLbl);
             this.Controls.Add(header);
+        }
+
+        private static Icon CreateMedicalAppIcon()
+        {
+            Bitmap bmp = new Bitmap(64, 64);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (Brush bg = new SolidBrush(Color.FromArgb(11, 94, 215)))
+                {
+                    g.FillEllipse(bg, 2, 2, 60, 60);
+                }
+                using (Brush cross = new SolidBrush(Color.White))
+                {
+                    g.FillRectangle(cross, 26, 14, 12, 36);
+                    g.FillRectangle(cross, 14, 26, 36, 12);
+                }
+            }
+            return Icon.FromHandle(bmp.GetHicon());
         }
 
         private void OnInstallClick(object sender, EventArgs e)
@@ -137,12 +139,6 @@ namespace ClinicReceptionDoctorSetup
                     {
                         resStream.CopyTo(fs);
                     }
-                }
-
-                string cleanedUrl = serverInput.Text.Trim().TrimEnd('/');
-                if (!string.IsNullOrEmpty(cleanedUrl))
-                {
-                    File.WriteAllText(Path.Combine(installDir, "server_url.txt"), cleanedUrl);
                 }
 
                 if (desktopShortcutBox.Checked)

@@ -2,7 +2,6 @@ package com.auracare.receptiondoctor
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,8 +9,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
@@ -20,7 +17,6 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.view.Gravity
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -28,9 +24,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
 import android.widget.Toast
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -47,8 +40,7 @@ class MainActivity : Activity() {
     private val FILE_CHOOSER_REQ_CODE = 1002
     private val CHANNEL_ID = "clinic_staff_reception_alerts_v3"
 
-    private var serverUrl = "https://clinic-que-system-clinic-a.vercel.app"
-    private var currentRoute = "/reception"
+    private val serverUrl = "https://clinic-que-system-clinic-a.vercel.app"
     private var pollTimer: Timer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val seenNotifIds = HashSet<String>()
@@ -57,102 +49,16 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = getSharedPreferences("clinic_staff_prefs", Context.MODE_PRIVATE)
-        serverUrl = prefs.getString("server_url", serverUrl) ?: serverUrl
-        currentRoute = prefs.getString("last_route", "/reception") ?: "/reception"
-
         setupNotificationChannel()
         requestRuntimePermissions()
         acquireKeepAliveWakeLock()
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0F172A"))
-        }
-
-        // Top Mode Bar: Reception vs Doctor Room vs TV Display + Server Settings (No SuperAdmin!)
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(16, 14, 16, 14)
-            setBackgroundColor(Color.parseColor("#0F172A"))
-        }
-
-        val btnReception = Button(this).apply {
-            text = "Reception ကောင်တာ"
-            textSize = 12f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#0B5ED7"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply {
-                marginEnd = 8
-            }
-            setOnClickListener { switchRoute("/reception") }
-        }
-
-        val btnDoctor = Button(this).apply {
-            text = "ဆရာဝန်အခန်း"
-            textSize = 12f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#15803D"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.1f).apply {
-                marginEnd = 8
-            }
-            setOnClickListener { switchRoute("/doctor") }
-        }
-
-        val btnTv = Button(this).apply {
-            text = "TV"
-            textSize = 12f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#4F46E5"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.6f).apply {
-                marginEnd = 8
-            }
-            setOnClickListener { switchRoute("/tv") }
-        }
-
-        val btnServer = Button(this).apply {
-            text = "Server"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#334155"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.7f)
-            setOnClickListener { showServerConfigDialog() }
-        }
-
-        topBar.addView(btnReception)
-        topBar.addView(btnDoctor)
-        topBar.addView(btnTv)
-        topBar.addView(btnServer)
-
-        webView = WebView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        }
-
+        webView = WebView(this)
         configureWebView()
+        setContentView(webView)
 
-        root.addView(topBar)
-        root.addView(webView)
-        setContentView(root)
-
-        webView.loadUrl("$serverUrl$currentRoute")
+        webView.loadUrl("$serverUrl/reception")
         startReceptionBookingAlertPolling()
-    }
-
-    private fun switchRoute(route: String) {
-        currentRoute = route
-        getSharedPreferences("clinic_staff_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .putString("last_route", currentRoute)
-            .apply()
-        webView.loadUrl("$serverUrl$currentRoute")
     }
 
     private fun configureWebView() {
@@ -222,29 +128,6 @@ class MainActivity : Activity() {
             fileUploadCallback?.onReceiveValue(result)
             fileUploadCallback = null
         }
-    }
-
-    private fun showServerConfigDialog() {
-        val input = EditText(this).apply {
-            setText(serverUrl)
-            setPadding(36, 28, 36, 28)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("ဆေးခန်း Server လိပ်စာ ပြင်ဆင်ရန်")
-            .setView(input)
-            .setPositiveButton("သိမ်းမည်") { _, _ ->
-                val cleaned = input.text.toString().trim().trimEnd('/')
-                if (cleaned.isNotEmpty()) {
-                    serverUrl = cleaned
-                    getSharedPreferences("clinic_staff_prefs", Context.MODE_PRIVATE)
-                        .edit()
-                        .putString("server_url", serverUrl)
-                        .apply()
-                    webView.loadUrl("$serverUrl$currentRoute")
-                }
-            }
-            .setNegativeButton("ပိတ်မည်", null)
-            .show()
     }
 
     private fun setupNotificationChannel() {
@@ -377,7 +260,7 @@ class MainActivity : Activity() {
                 Notification.Builder(this)
             }
 
-            builder.setSmallIcon(android.R.drawable.ic_menu_manage)
+            builder.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(Notification.BigTextStyle().bigText(body))

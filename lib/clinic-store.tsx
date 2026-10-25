@@ -223,6 +223,7 @@ export const INITIAL_SETTINGS: ClinicSettings = {
 };
 
 export interface SpecialtyPreset {
+  category?: string;
   codePrefix: string;
   specialty_my: string;
   specialty_en: string;
@@ -231,75 +232,294 @@ export interface SpecialtyPreset {
 }
 
 export const SPECIALTY_PRESETS: SpecialtyPreset[] = [
+  // ၁။ အခြေခံနှင့် အထွေထွေ (General)
   {
-    codePrefix: "CARD",
-    specialty_my: "နှလုံးနှင့် သွေးတိုး အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Senior Cardiologist (Heart & Blood Pressure)",
+    category: "အခြေခံနှင့် အထွေထွေ (General)",
+    codePrefix: "GP",
+    specialty_my: "အထွေထွေရောဂါကု သမားတော်",
+    specialty_en: "General Physician",
     defaultRoom: "101",
     defaultFee: 15000,
   },
   {
-    codePrefix: "GEN",
-    specialty_my: "အထွေထွေရောဂါနှင့် သက်ကြီးရွယ်အို ကျန်းမာရေး အထူးကု",
-    specialty_en: "General Physician & Senior Citizen Care",
+    category: "အခြေခံနှင့် အထွေထွေ (General)",
+    codePrefix: "PED",
+    specialty_my: "ကလေးအထူးကု",
+    specialty_en: "Pediatrician",
     defaultRoom: "102",
     defaultFee: 15000,
   },
   {
-    codePrefix: "PED",
-    specialty_my: "ကလေးအထူးကု ဆရာဝန်ကြီး",
-    specialty_en: "Senior Pediatrician (Child Health Specialist)",
+    category: "အခြေခံနှင့် အထွေထွေ (General)",
+    codePrefix: "OG",
+    specialty_my: "သားဖွားနှင့် မီးယပ်အထူးကု",
+    specialty_en: "Obstetrician & Gynecologist",
     defaultRoom: "103",
-    defaultFee: 15000,
-  },
-  {
-    codePrefix: "OBGYN",
-    specialty_my: "သားဖွားနှင့် မီးယပ် အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Obstetrician & Gynecologist (OB/GYN)",
-    defaultRoom: "104",
     defaultFee: 20000,
   },
   {
-    codePrefix: "ORTHO",
-    specialty_my: "အရိုး၊ အကြောနှင့် အဆစ်အမြစ် အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Orthopedic, Bone & Joint Specialist",
+    category: "အခြေခံနှင့် အထွေထွေ (General)",
+    codePrefix: "GER",
+    specialty_my: "သက်ကြီးရွယ်အို ကျန်းမာရေးအထူးကု",
+    specialty_en: "Geriatrician",
+    defaultRoom: "104",
+    defaultFee: 15000,
+  },
+
+  // ၂။ ခွဲစိတ်ကုသမှု (Surgical)
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "GS",
+    specialty_my: "အထွေထွေ ခွဲစိတ်အထူးကု",
+    specialty_en: "General Surgeon",
     defaultRoom: "105",
     defaultFee: 20000,
   },
   {
-    codePrefix: "EYE",
-    specialty_my: "မျက်စိနှင့် အတွင်းတိမ် အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Eye & Cataract Specialist (Ophthalmology)",
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "ORTHO",
+    specialty_my: "အရိုး၊ အကြော၊ အဆစ် ခွဲစိတ်အထူးကု",
+    specialty_en: "Orthopedic Surgeon",
+    defaultRoom: "106",
+    defaultFee: 20000,
+  },
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "NS",
+    specialty_my: "ဦးနှောက်နှင့် အာရုံကြော ခွဲစိတ်",
+    specialty_en: "Neurosurgeon",
+    defaultRoom: "107",
+    defaultFee: 25000,
+  },
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "URO",
+    specialty_my: "ဆီးနှင့် ကျောက်ကပ် ခွဲစိတ်",
+    specialty_en: "Urologist",
+    defaultRoom: "108",
+    defaultFee: 20000,
+  },
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "TS",
+    specialty_my: "ရင်ခေါင်း ခွဲစိတ်အထူးကု",
+    specialty_en: "Thoracic Surgeon",
+    defaultRoom: "109",
+    defaultFee: 25000,
+  },
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "CVS",
+    specialty_my: "နှလုံးနှင့် သွေးကြော ခွဲစိတ်",
+    specialty_en: "Cardiovascular Surgeon",
+    defaultRoom: "110",
+    defaultFee: 25000,
+  },
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "PS",
+    specialty_my: "ပလပ်စတစ်နှင့် အလှအပဆိုင်ရာ ခွဲစိတ်",
+    specialty_en: "Plastic Surgeon",
+    defaultRoom: "111",
+    defaultFee: 25000,
+  },
+  {
+    category: "ခွဲစိတ်ကုသမှု (Surgical)",
+    codePrefix: "GIS",
+    specialty_my: "အစာအိမ်နှင့် အူလမ်းကြောင်း ခွဲစိတ်",
+    specialty_en: "GI Surgeon",
+    defaultRoom: "112",
+    defaultFee: 20000,
+  },
+
+  // ၃။ သမားတော် (Internal Medicine)
+  {
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "CARDIO",
+    specialty_my: "နှလုံးအထူးကု",
+    specialty_en: "Cardiologist",
     defaultRoom: "201",
     defaultFee: 20000,
   },
   {
+    category: "သမားတော် (Internal Medicine)",
     codePrefix: "NEURO",
-    specialty_my: "ဦးနှောက်နှင့် အာရုံကြော အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Senior Neurologist (Brain & Nerve Specialist)",
+    specialty_my: "ဦးနှောက်နှင့် အာရုံကြော သမားတော်",
+    specialty_en: "Neurologist",
     defaultRoom: "202",
     defaultFee: 25000,
   },
   {
-    codePrefix: "ENT",
-    specialty_my: "နား၊ နှာခေါင်း၊ လည်ချောင်း အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "ENT Specialist (Ear, Nose & Throat)",
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "GASTRO",
+    specialty_my: "အစာအိမ်နှင့် အူလမ်းကြောင်း",
+    specialty_en: "Gastroenterologist",
     defaultRoom: "203",
-    defaultFee: 15000,
+    defaultFee: 20000,
   },
   {
-    codePrefix: "DERM",
-    specialty_my: "အရေပြားနှင့် အလှအပရေးရာ အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Consultant Dermatologist (Skin Specialist)",
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "ENDO",
+    specialty_my: "ဆီးချိုနှင့် ဟော်မုန်း",
+    specialty_en: "Endocrinologist",
     defaultRoom: "204",
-    defaultFee: 15000,
+    defaultFee: 20000,
   },
   {
-    codePrefix: "GI",
-    specialty_my: "အစာအိမ်၊ အူလမ်းကြောင်းနှင့် အသည်း အထူးကုဆရာဝန်ကြီး",
-    specialty_en: "Gastroenterologist & Hepatologist",
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "NEPHRO",
+    specialty_my: "ကျောက်ကပ် သမားတော်",
+    specialty_en: "Nephrologist",
     defaultRoom: "205",
     defaultFee: 20000,
+  },
+  {
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "PULMO",
+    specialty_my: "ရင်ခေါင်းနှင့် အဆုတ်",
+    specialty_en: "Pulmonologist",
+    defaultRoom: "206",
+    defaultFee: 20000,
+  },
+  {
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "HEPATO",
+    specialty_my: "အသည်း",
+    specialty_en: "Hepatologist",
+    defaultRoom: "207",
+    defaultFee: 20000,
+  },
+  {
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "HEMA",
+    specialty_my: "သွေးရောဂါအထူးကု",
+    specialty_en: "Hematologist",
+    defaultRoom: "208",
+    defaultFee: 20000,
+  },
+  {
+    category: "သမားတော် (Internal Medicine)",
+    codePrefix: "RHEUMO",
+    specialty_my: "အဆစ်အမြစ်ရောင်ရမ်းခြင်း",
+    specialty_en: "Rheumatologist",
+    defaultRoom: "209",
+    defaultFee: 20000,
+  },
+
+  // ၄။ အာရုံခံနှင့် အခြား (Sensory & Others)
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "EYE",
+    specialty_my: "မျက်စိအထူးကု",
+    specialty_en: "Ophthalmologist",
+    defaultRoom: "301",
+    defaultFee: 20000,
+  },
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "ENT",
+    specialty_my: "နား၊ နှာခေါင်း၊ လည်ချောင်း",
+    specialty_en: "ENT Specialist",
+    defaultRoom: "302",
+    defaultFee: 15000,
+  },
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "DERMA",
+    specialty_my: "အရေပြားအထူးကု",
+    specialty_en: "Dermatologist",
+    defaultRoom: "303",
+    defaultFee: 15000,
+  },
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "DENT",
+    specialty_my: "သွားနှင့် ခံတွင်း",
+    specialty_en: "Dentist",
+    defaultRoom: "304",
+    defaultFee: 15000,
+  },
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "PSY",
+    specialty_my: "စိတ်ကျန်းမာရေး",
+    specialty_en: "Psychiatrist",
+    defaultRoom: "305",
+    defaultFee: 20000,
+  },
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "RAD",
+    specialty_my: "ဓာတ်မှန်နှင့် ပုံရိပ်ဖော်",
+    specialty_en: "Radiologist",
+    defaultRoom: "306",
+    defaultFee: 15000,
+  },
+  {
+    category: "အာရုံခံနှင့် အခြား (Sensory & Others)",
+    codePrefix: "ANAES",
+    specialty_my: "မေ့ဆေးအထူးကု",
+    specialty_en: "Anesthesiologist",
+    defaultRoom: "307",
+    defaultFee: 20000,
+  },
+
+  // ၅။ ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "NM",
+    specialty_my: "အဏုမြူဆေးပညာ အထူးကု",
+    specialty_en: "Nuclear Medicine Physician",
+    defaultRoom: "401",
+    defaultFee: 25000,
+  },
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "MO",
+    specialty_my: "ဆေးသွင်းကင်ဆာ အထူးကု",
+    specialty_en: "Medical Oncologist",
+    defaultRoom: "402",
+    defaultFee: 25000,
+  },
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "RO",
+    specialty_my: "ဓာတ်ကင်ကင်ဆာ အထူးကု",
+    specialty_en: "Radiation Oncologist",
+    defaultRoom: "403",
+    defaultFee: 25000,
+  },
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "SO",
+    specialty_my: "ခွဲစိတ်ကင်ဆာ အထူးကု",
+    specialty_en: "Surgical Oncologist",
+    defaultRoom: "404",
+    defaultFee: 25000,
+  },
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "GO",
+    specialty_my: "မီးယပ်ကင်ဆာ အထူးကု",
+    specialty_en: "Gynecologic Oncologist",
+    defaultRoom: "405",
+    defaultFee: 25000,
+  },
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "PO",
+    specialty_my: "ကလေးကင်ဆာ အထူးကု",
+    specialty_en: "Pediatric Oncologist",
+    defaultRoom: "406",
+    defaultFee: 25000,
+  },
+  {
+    category: "ကင်ဆာနှင့် အဏုမြူ (Oncology & Nuclear)",
+    codePrefix: "HO",
+    specialty_my: "သွေးကင်ဆာ အထူးကု",
+    specialty_en: "Hemato-Oncologist",
+    defaultRoom: "407",
+    defaultFee: 25000,
   },
 ];
 
@@ -308,64 +528,95 @@ export function generateDoctorCode(
   roomNumber?: string,
   fallbackSeq = 1
 ): string {
-  const s = (specialtyText || "").toLowerCase();
+  const s = (specialtyText || "").toLowerCase().trim();
   let prefix = "DR";
-  if (s.includes("နှလုံး") || s.includes("cardio") || s.includes("heart")) {
-    prefix = "CARD";
-  } else if (
-    s.includes("အထွေထွေ") ||
-    s.includes("general") ||
-    s.includes("physician")
-  ) {
-    prefix = "GEN";
-  } else if (
-    s.includes("ကလေး") ||
-    s.includes("pediat") ||
-    s.includes("child")
-  ) {
-    prefix = "PED";
-  } else if (
-    s.includes("သားဖွား") ||
-    s.includes("မီးယပ်") ||
-    s.includes("gyne") ||
-    s.includes("obstet") ||
-    s.includes("og")
-  ) {
-    prefix = "OBGYN";
-  } else if (
-    s.includes("အရိုး") ||
-    s.includes("ortho") ||
-    s.includes("bone") ||
-    s.includes("joint")
-  ) {
-    prefix = "ORTHO";
-  } else if (
-    s.includes("မျက်စိ") ||
-    s.includes("eye") ||
-    s.includes("ophthal")
-  ) {
-    prefix = "EYE";
-  } else if (
-    s.includes("ဦးနှောက်") ||
-    s.includes("အာရုံကြော") ||
-    s.includes("neuro")
-  ) {
+
+  // 1. Check exact or partial match against SPECIALTY_PRESETS first
+  const matchedPreset = SPECIALTY_PRESETS.find(
+    (p) =>
+      s.includes(p.specialty_my.toLowerCase()) ||
+      s.includes(p.specialty_en.toLowerCase()) ||
+      p.specialty_my.toLowerCase().includes(s)
+  );
+  if (matchedPreset && s.length >= 2) {
+    prefix = matchedPreset.codePrefix;
+  } else if (s.includes("နှလုံး") && s.includes("ခွဲစိတ်")) {
+    prefix = "CVS";
+  } else if (s.includes("နှလုံး") || s.includes("cardio") || s.includes("heart")) {
+    prefix = "CARDIO";
+  } else if (s.includes("ဦးနှောက်") && s.includes("ခွဲစိတ်")) {
+    prefix = "NS";
+  } else if (s.includes("ဦးနှောက်") || s.includes("အာရုံကြော") || s.includes("neuro")) {
     prefix = "NEURO";
+  } else if (s.includes("အစာအိမ်") && s.includes("ခွဲစိတ်")) {
+    prefix = "GIS";
+  } else if (s.includes("အစာအိမ်") || s.includes("gastro")) {
+    prefix = "GASTRO";
+  } else if (s.includes("အသည်း") || s.includes("hepato")) {
+    prefix = "HEPATO";
+  } else if (s.includes("ဆီးချို") || s.includes("ဟော်မုန်း") || s.includes("endo")) {
+    prefix = "ENDO";
+  } else if (s.includes("ကျောက်ကပ်") && s.includes("ခွဲစိတ်")) {
+    prefix = "URO";
+  } else if (s.includes("ကျောက်ကပ်") || s.includes("nephro")) {
+    prefix = "NEPHRO";
+  } else if (s.includes("ရင်ခေါင်း") && s.includes("ခွဲစိတ်")) {
+    prefix = "TS";
+  } else if (s.includes("ရင်ခေါင်း") || s.includes("အဆုတ်") || s.includes("pulmo")) {
+    prefix = "PULMO";
+  } else if (s.includes("သွေးကင်ဆာ")) {
+    prefix = "HO";
+  } else if (s.includes("သွေး") || s.includes("hema")) {
+    prefix = "HEMA";
+  } else if (s.includes("ကလေးကင်ဆာ")) {
+    prefix = "PO";
+  } else if (s.includes("ကလေး") || s.includes("ped")) {
+    prefix = "PED";
+  } else if (s.includes("မီးယပ်ကင်ဆာ")) {
+    prefix = "GO";
+  } else if (s.includes("သားဖွား") || s.includes("မီးယပ်") || s.includes("og")) {
+    prefix = "OG";
+  } else if (s.includes("သက်ကြီး") || s.includes("geriat")) {
+    prefix = "GER";
+  } else if (s.includes("အရိုး") || s.includes("ortho")) {
+    prefix = "ORTHO";
+  } else if (s.includes("ပလပ်စတစ်") || s.includes("plastic")) {
+    prefix = "PS";
+  } else if (s.includes("ခွဲစိတ်ကင်ဆာ")) {
+    prefix = "SO";
+  } else if (s.includes("ခွဲစိတ်") || s.includes("surg")) {
+    prefix = "GS";
+  } else if (s.includes("မျက်စိ") || s.includes("eye") || s.includes("ophthal")) {
+    prefix = "EYE";
   } else if (s.includes("နား") || s.includes("နှာခေါင်း") || s.includes("ent")) {
     prefix = "ENT";
-  } else if (
-    s.includes("အရေပြား") ||
-    s.includes("derm") ||
-    s.includes("skin")
-  ) {
-    prefix = "DERM";
-  } else if (
-    s.includes("အစာအိမ်") ||
-    s.includes("အသည်း") ||
-    s.includes("gastro")
-  ) {
-    prefix = "GI";
+  } else if (s.includes("အရေပြား") || s.includes("derm")) {
+    prefix = "DERMA";
+  } else if (s.includes("သွား") || s.includes("ခံတွင်း") || s.includes("dent")) {
+    prefix = "DENT";
+  } else if (s.includes("စိတ်") || s.includes("psych")) {
+    prefix = "PSY";
+  } else if (s.includes("ဓာတ်မှန်") || s.includes("radio")) {
+    prefix = "RAD";
+  } else if (s.includes("မေ့ဆေး") || s.includes("anaes")) {
+    prefix = "ANAES";
+  } else if (s.includes("အဏုမြူ") || s.includes("nuclear")) {
+    prefix = "NM";
+  } else if (s.includes("ဓာတ်ကင်") || s.includes("radiation")) {
+    prefix = "RO";
+  } else if (s.includes("ကင်ဆာ") || s.includes("oncol")) {
+    prefix = "MO";
+  } else if (s.includes("အထွေထွေ") || s.includes("general") || s.includes("gp")) {
+    prefix = "GP";
+  } else {
+    const englishLetters = (specialtyText || "")
+      .replace(/[^A-Za-z]/g, "")
+      .toUpperCase();
+    if (englishLetters.length >= 2) {
+      prefix = englishLetters.slice(0, 4);
+    }
   }
+
   const cleanRoom = (roomNumber || "").replace(/[^0-9A-Za-z]/g, "");
   const suffix = cleanRoom || String(100 + fallbackSeq);
   return `${prefix}-${suffix}`;
@@ -717,6 +968,7 @@ export interface PersistedClinicState {
   transactions: Transaction[];
   messages: ClinicMessage[];
   receptionNotifications?: ReceptionNotification[];
+  customSpecialties?: SpecialtyPreset[];
 }
 
 export interface DoctorFormInput {
@@ -741,6 +993,7 @@ interface ClinicContextValue {
   settings: ClinicSettings;
   patients: Patient[];
   doctors: Doctor[];
+  allSpecialties: SpecialtyPreset[];
   bookings: Booking[];
   transactions: Transaction[];
   messages: ClinicMessage[];
@@ -942,12 +1195,48 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
   const [receptionNotifications, setReceptionNotifications] = useState<
     ReceptionNotification[]
   >([]);
+  const [customSpecialties, setCustomSpecialties] = useState<SpecialtyPreset[]>(
+    []
+  );
   const [currentPatientId, setCurrentPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(true);
 
   const versionRef = useRef<number>(0);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
+  const customSpecialtiesRef = useRef<SpecialtyPreset[]>([]);
+  customSpecialtiesRef.current = customSpecialties;
+
+  const allSpecialties = React.useMemo<SpecialtyPreset[]>(() => {
+    const merged: SpecialtyPreset[] = [...SPECIALTY_PRESETS];
+    const seen = new Set(
+      merged.map((s) => s.specialty_my.trim().toLowerCase())
+    );
+    for (const c of customSpecialties) {
+      const key = (c.specialty_my || "").trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        merged.push(c);
+      }
+    }
+    for (const d of doctors) {
+      const specMy = (d.specialty_my || d.specialty || "").trim();
+      const key = specMy.toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        const prefix = (d.doctor_code || "DR").split("-")[0] || "DR";
+        merged.push({
+          category: "ဆေးခန်းမှ ထည့်သွင်းထားသော ဘာသာရပ်များ (Custom)",
+          codePrefix: prefix,
+          specialty_my: specMy,
+          specialty_en: d.specialty || specMy,
+          defaultRoom: d.room_number || "101",
+          defaultFee: d.consultation_fee || 15000,
+        });
+      }
+    }
+    return merged;
+  }, [customSpecialties, doctors]);
 
   const applyIncomingState = useCallback((incoming: PersistedClinicState) => {
     if (!incoming || typeof incoming !== "object") return;
@@ -963,6 +1252,9 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       setSettings((prev) => ({ ...prev, ...incoming.settings }));
     }
     if (Array.isArray(incoming.doctors)) setDoctors(incoming.doctors);
+    if (Array.isArray(incoming.customSpecialties)) {
+      setCustomSpecialties(incoming.customSpecialties);
+    }
     if (Array.isArray(incoming.patients)) {
       const normalizedPatients: Patient[] = [];
       for (const p of incoming.patients) {
@@ -993,6 +1285,8 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
       versionRef.current = nextVersion;
       const fullPayload: PersistedClinicState = {
         ...next,
+        customSpecialties:
+          next.customSpecialties ?? customSpecialtiesRef.current,
         version: nextVersion,
       };
 
@@ -2390,6 +2684,31 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
 
       const nextDoctors = [...doctors, newDoc];
       setDoctors(nextDoctors);
+
+      // Automatically save custom specialty to database if not already in SPECIALTY_PRESETS / customSpecialties
+      let nextCustomSpecs = customSpecialtiesRef.current;
+      const specKey = specMy.trim().toLowerCase();
+      const existsInPresets =
+        SPECIALTY_PRESETS.some(
+          (p) => p.specialty_my.trim().toLowerCase() === specKey
+        ) ||
+        nextCustomSpecs.some(
+          (p) => p.specialty_my.trim().toLowerCase() === specKey
+        );
+      if (specKey && !existsInPresets) {
+        const prefix = (autoCode.split("-")[0] || "DR").toUpperCase();
+        const newPreset: SpecialtyPreset = {
+          category: "ဆေးခန်းမှ ထည့်သွင်းထားသော ဘာသာရပ်များ (Custom)",
+          codePrefix: prefix,
+          specialty_my: specMy,
+          specialty_en: specEn,
+          defaultRoom: roomNum,
+          defaultFee: Number(input.consultation_fee) || settings.defaultFee,
+        };
+        nextCustomSpecs = [...nextCustomSpecs, newPreset];
+        setCustomSpecialties(nextCustomSpecs);
+      }
+
       persistState({
         settings,
         patients,
@@ -2398,6 +2717,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         transactions,
         messages,
         receptionNotifications,
+        customSpecialties: nextCustomSpecs,
       });
       return newDoc;
     },
@@ -3064,6 +3384,7 @@ export function ClinicProvider({ children }: { children: React.ReactNode }) {
         settings,
         patients,
         doctors,
+        allSpecialties,
         bookings,
         transactions,
         messages,

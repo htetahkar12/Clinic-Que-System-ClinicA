@@ -1923,6 +1923,19 @@ export default function PatientPortalPage() {
             );
           })}
       </div>
+
+      {/* Subtle Footer with Patient Android App Download Link */}
+      <footer className="mt-10 border-t border-slate-200 pt-5 pb-4 text-center text-xs font-bold text-slate-600">
+        <a
+          href="/downloads/Clinic-Patient-Android.apk"
+          download="Clinic-Patient-Android.apk"
+          className="text-blue-700 underline underline-offset-4 hover:text-blue-900"
+        >
+          {lang === "my"
+            ? "ဖုန်းထဲတွင် အသုံးပြုရန် လူနာ Android App (.apk) ဒေါင်းလုဒ်ဆွဲရန်"
+            : "Download Patient Android App (.apk)"}
+        </a>
+      </footer>
     </div>
   );
 }

@@ -1,88 +1,50 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace ClinicReceptionDoctorDesktop
 {
     public class MainForm : Form
     {
-        private string serverUrl = "https://clinic-que-system-clinic-a.vercel.app";
-        private string configPath;
+        private readonly string serverUrl = "https://clinic-que-system-clinic-a.vercel.app";
         private WebBrowser browser;
-        private TextBox urlBox;
-        private Label statusLabel;
 
         public MainForm()
         {
-            string appData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ClinicReceptionDoctor"
-            );
-            Directory.CreateDirectory(appData);
-            configPath = Path.Combine(appData, "server_url.txt");
-            if (File.Exists(configPath))
-            {
-                string saved = File.ReadAllText(configPath).Trim();
-                if (!string.IsNullOrEmpty(saved)) serverUrl = saved.TrimEnd('/');
-            }
-
             this.Text = "Clinic Reception & Doctor System (Windows Desktop)";
-            this.Width = 1360;
-            this.Height = 860;
+            this.Width = 1320;
+            this.Height = 840;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(15, 23, 42);
+            this.Icon = CreateMedicalAppIcon();
 
             Panel topBar = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 64,
+                Height = 60,
                 BackColor = Color.FromArgb(15, 23, 42),
-                Padding = new Padding(14, 10, 14, 10)
+                Padding = new Padding(16, 10, 16, 10)
             };
 
             Label titleLbl = new Label
             {
-                Text = "🏥 Reception + Doctor Desktop Console",
+                Text = "🏥 Reception နှင့် ဆရာဝန်အခန်း ထိန်းချုပ်စနစ် (Windows Desktop)",
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 13, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12.5f, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(14, 18)
+                Location = new Point(16, 17)
             };
             topBar.Controls.Add(titleLbl);
 
-            Button btnReception = CreateModeButton("Reception ကောင်တာ (/reception)", 360, Color.FromArgb(11, 94, 215));
+            Button btnReception = CreateModeButton("Reception ကောင်တာ ဖွင့်မည်", 520, Color.FromArgb(11, 94, 215));
             btnReception.Click += (s, e) => OpenRoute("/reception");
             topBar.Controls.Add(btnReception);
 
-            Button btnDoctor = CreateModeButton("ဆရာဝန်အခန်း (/doctor)", 595, Color.FromArgb(21, 128, 61));
+            Button btnDoctor = CreateModeButton("ဆရာဝန်အခန်း ဖွင့်မည်", 770, Color.FromArgb(21, 128, 61));
             btnDoctor.Click += (s, e) => OpenRoute("/doctor");
             topBar.Controls.Add(btnDoctor);
-
-            Button btnTv = CreateModeButton("TV ဖန်သားပြင် (/tv)", 795, Color.FromArgb(79, 70, 229));
-            btnTv.Click += (s, e) => OpenRoute("/tv");
-            topBar.Controls.Add(btnTv);
-
-            urlBox = new TextBox
-            {
-                Text = serverUrl,
-                Width = 240,
-                Location = new Point(980, 19),
-                Font = new Font("Segoe UI", 9, FontStyle.Regular)
-            };
-            topBar.Controls.Add(urlBox);
-
-            Button btnSaveUrl = CreateModeButton("Server သိမ်းမည်", 1228, Color.FromArgb(51, 65, 85));
-            btnSaveUrl.Width = 105;
-            btnSaveUrl.Click += (s, e) =>
-            {
-                serverUrl = urlBox.Text.Trim().TrimEnd('/');
-                File.WriteAllText(configPath, serverUrl);
-                statusLabel.Text = "ချိတ်ဆက်ထားသော Server: " + serverUrl;
-                OpenRoute("/reception");
-            };
-            topBar.Controls.Add(btnSaveUrl);
 
             Panel bodyPanel = new Panel
             {
@@ -94,53 +56,53 @@ namespace ClinicReceptionDoctorDesktop
             Panel card = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 220,
+                Height = 200,
                 BackColor = Color.White,
                 Padding = new Padding(24)
             };
 
             Label infoTitle = new Label
             {
-                Text = "Reception နှင့် ဆရာဝန်အခန်း ထိန်းချုပ်စနစ် (Windows Edition)",
-                Font = new Font("Segoe UI", 16, FontStyle.Bold),
+                Text = "Reception ကောင်တာနှင့် ဆရာဝန်အခန်း ရွေးချယ်ဖွင့်လှစ်ရန်",
+                Font = new Font("Segoe UI", 15, FontStyle.Bold),
                 ForeColor = Color.FromArgb(15, 23, 42),
                 AutoSize = true,
-                Location = new Point(24, 20)
+                Location = new Point(24, 22)
             };
             card.Controls.Add(infoTitle);
 
-            statusLabel = new Label
+            Label subTitle = new Label
             {
-                Text = "ချိတ်ဆက်ထားသော Server: " + serverUrl + "  |  မှတ်ချက် - SuperAdmin (/$uper@dmin) ကို Web မှသာ ထိန်းချုပ်နိုင်ပါသည်။",
+                Text = "အောက်ပါ ခလုတ်များကို နှိပ်၍ Reception စီမံခန့်ခွဲမှု သို့မဟုတ် ဆရာဝန်အခန်း အလှည့်ခေါ်စနစ်သို့ တိုက်ရိုက် ဝင်ရောက်နိုင်ပါသည်။",
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = Color.FromArgb(21, 128, 61),
+                ForeColor = Color.FromArgb(71, 85, 105),
                 AutoSize = true,
                 Location = new Point(24, 58)
             };
-            card.Controls.Add(statusLabel);
+            card.Controls.Add(subTitle);
 
             Button bigReceptionBtn = new Button
             {
-                Text = "၁။ Reception ကောင်တာ စီမံခန့်ခွဲမှု ဖွင့်မည် (/reception)",
+                Text = "၁။ Reception ကောင်တာ စနစ် ဖွင့်မည်",
                 Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 BackColor = Color.FromArgb(11, 94, 215),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(440, 56),
-                Location = new Point(24, 105)
+                Size = new Size(420, 56),
+                Location = new Point(24, 102)
             };
             bigReceptionBtn.Click += (s, e) => OpenRoute("/reception");
             card.Controls.Add(bigReceptionBtn);
 
             Button bigDoctorBtn = new Button
             {
-                Text = "၂။ ဆရာဝန်အခန်း ထိန်းချုပ်စနစ် ဖွင့်မည် (/doctor)",
+                Text = "၂။ ဆရာဝန်အခန်း စနစ် ဖွင့်မည်",
                 Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 BackColor = Color.FromArgb(21, 128, 61),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(440, 56),
-                Location = new Point(484, 105)
+                Size = new Size(420, 56),
+                Location = new Point(464, 102)
             };
             bigDoctorBtn.Click += (s, e) => OpenRoute("/doctor");
             card.Controls.Add(bigDoctorBtn);
@@ -172,13 +134,32 @@ namespace ClinicReceptionDoctorDesktop
             this.Controls.Add(topBar);
         }
 
+        private static Icon CreateMedicalAppIcon()
+        {
+            Bitmap bmp = new Bitmap(64, 64);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (Brush bg = new SolidBrush(Color.FromArgb(11, 94, 215)))
+                {
+                    g.FillEllipse(bg, 2, 2, 60, 60);
+                }
+                using (Brush cross = new SolidBrush(Color.White))
+                {
+                    g.FillRectangle(cross, 26, 14, 12, 36);
+                    g.FillRectangle(cross, 14, 26, 36, 12);
+                }
+            }
+            return Icon.FromHandle(bmp.GetHicon());
+        }
+
         private Button CreateModeButton(string text, int x, Color bg)
         {
             return new Button
             {
                 Text = text,
-                Location = new Point(x, 12),
-                Size = new Size(225, 40),
+                Location = new Point(x, 10),
+                Size = new Size(235, 40),
                 BackColor = bg,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -188,13 +169,11 @@ namespace ClinicReceptionDoctorDesktop
 
         private void OpenRoute(string route)
         {
-            // Block SuperAdmin inside Reception+Doctor Windows App
             if (route.Contains("$uper@dmin")) return;
 
             string fullUrl = serverUrl.TrimEnd('/') + route;
             try
             {
-                // Launch in Edge/Chrome App Mode (--app=...) for full modern Chromium PWA support
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = "msedge.exe",

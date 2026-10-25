@@ -889,11 +889,6 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
                 icon: Icon(Icons.medical_information, size: 16),
                 label: Text('ဆရာဝန်အခန်း'),
               ),
-              ButtonSegment(
-                value: StaffWorkspaceMode.tvDisplay,
-                icon: Icon(Icons.tv, size: 16),
-                label: Text('TV ဖန်သားပြင်'),
-              ),
             ],
             selected: {_mode},
             onSelectionChanged: (s) => setState(() => _mode = s.first),
@@ -903,11 +898,6 @@ class _StaffWorkspaceScreenState extends State<StaffWorkspaceScreen> {
             tooltip: 'PIN ပြောင်းရန်',
             onPressed: _showChangePinDialog,
             icon: const Icon(Icons.key),
-          ),
-          IconButton(
-            tooltip: 'Server ချိတ်ဆက်မှု',
-            onPressed: _showServerUrlDialog,
-            icon: const Icon(Icons.dns_outlined),
           ),
           IconButton(
             tooltip: 'ထွက်မည်',
